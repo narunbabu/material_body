@@ -54,68 +54,95 @@ def initialize_densities(
     compulsory_increase: float,
     parent_body: Dict[str, Any] = None,
     parent_radius: float = 1.0,
-    parent_center: Tuple[float, float] = (0.0, 0.0)
-    ) -> None:
+    parent_center: Tuple[float, float] = (0.0, 0.0),
+    depth: int = 0  # Add depth parameter to track nesting level
+        ) -> None:
+    
+    def get_parent_layer_densities(parent_body, parent_layer_idx, placement_angle):
+        """Get densities from parent layer at specific angle"""
+        parent_layer = parent_body['layers'][parent_layer_idx]
+        num_parent_patches = len(parent_layer['density_profile'][0])
+        angle_per_patch = 360 / num_parent_patches
+        patch_idx = int((placement_angle % 360) / angle_per_patch)
+        return parent_layer['density_profile'][:, patch_idx]
+
+    # Initialize base layer densities
     for layer_index, layer in enumerate(body['layers']):
         num_micro_layers = layer.get('num_micro_layers', 1)
         layer_density = layer['density']
-        total_variation = 0.2  # Total variation across micro-layers (20%)
-        total_increase = layer_density * total_variation
-        # Base densities increasing from outer to inner micro-layers
+        
+        # Calculate base densities with gradual increase
         base_densities = np.linspace(
-            layer_density * (1 - total_variation / 2),
-            layer_density * (1 + total_variation / 2),
+            layer_density,
+            layer_density * 1.2,  # 20% increase for innermost micro-layer
             num_micro_layers
         )
+        
+        # Initialize density profile
         layer['density_profile'] = np.zeros((num_micro_layers, num_patches))
-        initial_amplitude = layer_density * 0.05  # Initial amplitude (5% of layer_density)
-        decay_factor = 0.5  # Amplitude decreases by half each inner micro-layer
+        
+        # Add wave pattern with decreasing amplitude
         for micro_layer_index in range(num_micro_layers):
-            d_i = base_densities[micro_layer_index]
-            amplitude = initial_amplitude * (decay_factor ** micro_layer_index)
-            # Variation function (e.g., sine wave)
-            variation = np.sin(2 * np.pi * np.arange(num_patches) / num_patches)
-            density_variation = amplitude * variation
-            layer['density_profile'][micro_layer_index, :] = d_i + density_variation
-            # Ensure densities are positive
-            layer['density_profile'][micro_layer_index, :] = np.maximum(layer['density_profile'][micro_layer_index, :], 0)
-        # Adjust densities to ensure inner layer patches have densities greater than adjacent outer layer patches
-        if num_micro_layers > 1:
-            for micro_layer_index in range(1, num_micro_layers):
-                outer_densities = layer['density_profile'][micro_layer_index - 1, :]
-                current_densities = layer['density_profile'][micro_layer_index, :]
-                # Ensure current densities are greater than outer densities plus a tolerance
-                min_increase = compulsory_increase
-                adjusted_densities = np.maximum(current_densities, outer_densities + min_increase)
-                layer['density_profile'][micro_layer_index, :] = adjusted_densities
-    # Recursively initialize child bodies
+            base_density = base_densities[micro_layer_index]
+            amplitude = base_density * 0.05 * (0.5 ** micro_layer_index)  # Decreasing amplitude
+            variation = amplitude * np.sin(2 * np.pi * np.arange(num_patches) / num_patches)
+            layer['density_profile'][micro_layer_index, :] = base_density + variation
+
+    # Adjust child body densities based on parent
+    if parent_body and 'parent_layer' in body:
+        parent_layer_idx = body['parent_layer']
+        placement_angle = body['placement_angle']
+        
+        # Get parent densities at placement angle
+        parent_densities = get_parent_layer_densities(parent_body, parent_layer_idx, placement_angle)
+        
+        # Adjust outer layer densities to be higher than parent
+        outer_layer = body['layers'][0]
+        min_density_increase = compulsory_increase * (1 + depth * 0.5)  # Increase with depth
+        
+        for micro_idx in range(outer_layer['density_profile'].shape[0]):
+            parent_density = parent_densities[min(micro_idx, len(parent_densities)-1)]
+            min_required_density = parent_density + min_density_increase
+            
+            # Ensure all patches have higher density than parent
+            outer_layer['density_profile'][micro_idx, :] = np.maximum(
+                outer_layer['density_profile'][micro_idx, :],
+                min_required_density
+            )
+            
+            # Add angular variation based on distance from parent contact point
+            angular_positions = np.linspace(0, 2*np.pi, num_patches, endpoint=False)
+            contact_angle = np.radians(placement_angle)
+            angular_distance = np.abs(np.angle(np.exp(1j * (angular_positions - contact_angle))))
+            
+            # Density increases with angular distance from contact point
+            density_variation = min_density_increase * (angular_distance / np.pi)
+            outer_layer['density_profile'][micro_idx, :] += density_variation
+
+    # Ensure density increases inward within each layer
+    for layer in body['layers']:
+        for micro_idx in range(1, layer['density_profile'].shape[0]):
+            layer['density_profile'][micro_idx, :] = np.maximum(
+                layer['density_profile'][micro_idx, :],
+                layer['density_profile'][micro_idx-1, :] + compulsory_increase
+            )
+
+    # Recursively initialize child bodies with increased depth
     for child in body.get('child_bodies', []):
-        # Determine the parent layer's densities at the point of contact
-        parent_layer_index = child['parent_layer']
-        parent_layer = body['layers'][parent_layer_index]
-        parent_density_profile = parent_layer['density_profile']
-        # Adjust the child body's outer layer densities
-        child_num_patches = num_patches  # Assuming same number of patches
-        child_outer_layer = child['layers'][0]
-        child_num_micro_layers = child_outer_layer.get('num_micro_layers', 1)
-        # Initialize child densities
         initialize_densities(
-            child, num_patches, compulsory_increase,
-            parent_body=body, parent_radius=parent_radius, parent_center=parent_center
+            child,
+            num_patches,
+            compulsory_increase,
+            parent_body=body,
+            parent_radius=parent_radius,
+            parent_center=parent_center,
+            depth=depth + 1  # Increment depth for nested bodies
         )
-        # Adjust child outer layer densities to be greater than parent densities at point of contact
-        parent_densities = parent_density_profile[-1, :]  # Densities at innermost micro-layer of parent layer
-        child_outer_densities = child_outer_layer['density_profile'][0, :]
-        min_increase = compulsory_increase  # Tolerance
-        adjusted_densities = np.maximum(child_outer_densities, parent_densities + min_increase)
-        child_outer_layer['density_profile'][0, :] = adjusted_densities
-        # Ensure densities increase towards inner micro-layers in child body
-        for micro_layer_index in range(1, child_num_micro_layers):
-            outer_densities = child_outer_layer['density_profile'][micro_layer_index - 1, :]
-            current_densities = child_outer_layer['density_profile'][micro_layer_index, :]
-            # Ensure current densities are greater than outer densities plus a tolerance
-            adjusted_densities = np.maximum(current_densities, outer_densities + min_increase)
-            child_outer_layer['density_profile'][micro_layer_index, :] = adjusted_densities
+def update_all_child_densities(parent_body, parent_center=(0.0, 0.0), parent_radius=1.0):
+    for child in parent_body.get('child_bodies', []):
+        update_child_body_density(parent_body, child, parent_center, parent_radius)
+        # Now recursively call for this child's children
+        update_all_child_densities(child, child['center'], child['radius'])
 
 def calculate_density_mismatch(
     body: Dict[str, Any],
@@ -433,6 +460,7 @@ class MaterialBodyCanvas(FigureCanvas):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.updateGeometry()
         initialize_densities(self.material_object, self.num_patches, self.compulsory_increase)
+        update_all_child_densities(self.material_object)
         for child in self.material_object.get('child_bodies', []):
             update_child_body_density(self.material_object, child)
         self.min_density, self.max_density = self.get_density_range(self.material_object)
@@ -460,10 +488,70 @@ class MaterialBodyCanvas(FigureCanvas):
         else:
             self.cmap = cm.get_cmap('viridis_r')
     # In MaterialBodyCanvas, add method to zoom to specific body:
+    # Add this utility function at the class level if not already present
+    def find_parent_body(self, current_body: Dict[str, Any], target_body: Dict[str, Any]) -> Dict[str, Any]:
+        """Find the parent body of a given target body"""
+        if current_body == target_body:
+            return None
+        for child in current_body.get('child_bodies', []):
+            if child == target_body:
+                return current_body
+            result = self.find_parent_body(child, target_body)
+            if result:
+                return result
+        return None
+
     def zoom_to_body(self, body_name: str) -> None:
         """Zoom to the extent of the specified body"""
-        def find_body_bounds(body, center=(0,0), radius=1.0):
-            # Get body's bounds
+        def find_body(current_body, target_name):
+            """Find a body by name"""
+            if current_body['name'] == target_name:
+                return current_body
+            for child in current_body.get('child_bodies', []):
+                result = find_body(child, target_name)
+                if result:
+                    return result
+            return None
+
+        def calculate_body_position(body, parent_center=(0,0), parent_radius=1.0, parent_rotation=0.0):
+            """Calculate absolute position of a body considering parent transformations"""
+            if 'parent_layer' in body:
+                # Find the parent body
+                parent_body = self.find_parent_body(self.material_object, body)
+                if not parent_body:
+                    return parent_center, parent_radius, parent_rotation
+
+                # Get parent layer properties
+                parent_layer_idx = body['parent_layer']
+                previous_layers_thickness = sum(
+                    layer['thickness'] for layer in parent_body['layers'][:parent_layer_idx]
+                )
+                current_layer_thickness = parent_body['layers'][parent_layer_idx]['thickness']
+                
+                # Calculate radius from parent center
+                child_center_radius = parent_radius * (
+                    1 - previous_layers_thickness - current_layer_thickness / 2
+                )
+                
+                # Calculate placement considering parent rotation
+                total_angle = body['placement_angle'] + parent_rotation
+                angle_rad = np.radians(total_angle)
+                
+                # Calculate absolute center position
+                center_x = parent_center[0] + child_center_radius * np.cos(angle_rad)
+                center_y = parent_center[1] + child_center_radius * np.sin(angle_rad)
+                
+                # Calculate child radius
+                radius = parent_radius * current_layer_thickness / 2
+                
+                return (center_x, center_y), radius, total_angle
+            return parent_center, parent_radius, parent_rotation
+
+        def find_body_bounds(body, parent_center=(0,0), parent_radius=1.0, parent_rotation=0.0):
+            """Find bounds of body and all its children considering parent transformations"""
+            center, radius, rotation = calculate_body_position(body, parent_center, parent_radius, parent_rotation)
+            
+            # Initialize bounds with current body
             bounds = {
                 'xmin': center[0] - radius,
                 'xmax': center[0] + radius,
@@ -471,28 +559,41 @@ class MaterialBodyCanvas(FigureCanvas):
                 'ymax': center[1] + radius
             }
             
-            # Include child bodies in bounds
+            # Include child bodies
             for child in body.get('child_bodies', []):
-                if 'center' in child and 'radius' in child:
-                    child_bounds = find_body_bounds(child, child['center'], child['radius'])
-                    bounds['xmin'] = min(bounds['xmin'], child_bounds['xmin'])
-                    bounds['xmax'] = max(bounds['xmax'], child_bounds['xmax'])
-                    bounds['ymin'] = min(bounds['ymin'], child_bounds['ymin'])
-                    bounds['ymax'] = max(bounds['ymax'], child_bounds['ymax'])
+                child_bounds = find_body_bounds(child, center, radius, rotation)
+                bounds['xmin'] = min(bounds['xmin'], child_bounds['xmin'])
+                bounds['xmax'] = max(bounds['xmax'], child_bounds['xmax'])
+                bounds['ymin'] = min(bounds['ymin'], child_bounds['ymin'])
+                bounds['ymax'] = max(bounds['ymax'], child_bounds['ymax'])
             
             return bounds
 
-        def find_body_and_bounds(body, target_name, center=(0,0), radius=1.0):
+        def find_body_and_bounds(body, target_name, parent_center=(0,0), parent_radius=1.0, parent_rotation=0.0):
+            """Recursively find target body and calculate its bounds"""
+            # Update parent rotation with body's rotation angle
+            current_rotation = (parent_rotation + body.get('rotation_angle', 0.0)) % 360
+
             if body['name'] == target_name:
-                return find_body_bounds(body, center, radius)
-            
+                return find_body_bounds(body, parent_center, parent_radius, current_rotation)
+                
             for child in body.get('child_bodies', []):
-                if 'center' in child and 'radius' in child:
-                    result = find_body_and_bounds(child, target_name, child['center'], child['radius'])
-                    if result:
-                        return result
+                child_center, child_radius, child_rotation = calculate_body_position(
+                    child, parent_center, parent_radius, current_rotation
+                )
+                result = find_body_and_bounds(
+                    child, target_name, child_center, child_radius, current_rotation
+                )
+                if result:
+                    return result
             return None
 
+        # Find the target body first
+        target_body = find_body(self.material_object, body_name)
+        if not target_body:
+            return
+
+        # Calculate bounds
         bounds = find_body_and_bounds(self.material_object, body_name)
         if bounds:
             # Add 20% padding around the bounds
@@ -505,7 +606,6 @@ class MaterialBodyCanvas(FigureCanvas):
             self.ax.set_ylim(bounds['ymin'] - padding_y, bounds['ymax'] + padding_y)
             self.update_limits()
             self.draw()
-
     def plot_material_body(self):
         self.fig.clear()
         self.ax = self.fig.add_subplot(111)
