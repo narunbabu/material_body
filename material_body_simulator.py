@@ -1,3 +1,4 @@
+#material_body_simulator.py
 import sys
 import pickle
 from dataclasses import dataclass
@@ -355,6 +356,53 @@ def find_parent_body(
             return result
     return None
 
+# added on 29-10-2024
+def check_and_shed_higher_order_bodies(body, external_density):
+    if body.get('can_shed', False) and external_density > body.get('density_threshold', float('inf')):
+        if body.get('child_bodies'):
+            shed_body = body['child_bodies'].pop(0)
+            print(f"{body['name']} has shed higher-order body {shed_body['name']}")
+            update_body_properties_after_shedding(body)
+        else:
+            print(f"{body['name']} cannot shed further; no child bodies to shed")
+
+def update_body_properties_after_shedding(body):
+    if body['layers']:
+        outermost_layer = body['layers'][0]
+        reduction_factor = 0.1  # Adjust as needed
+        new_thickness = outermost_layer['thickness'] - reduction_factor * outermost_layer['thickness']
+        if new_thickness <= 0:
+            body['layers'].pop(0)
+            print(f"{body['name']} has reduced its layers by removing an outer layer")
+        else:
+            outermost_layer['thickness'] = new_thickness
+            print(f"{body['name']}'s outer layer thickness reduced to {new_thickness}")
+    else:
+        print(f"{body['name']} has no layers to adjust after shedding")
+
+def calculate_external_density(body):
+    parent_body = find_parent_body(material_object, body)
+    if parent_body:
+        parent_center = parent_body.get('center', (0, 0))
+        parent_radius = parent_body.get('radius', 1)
+        parent_layer_index = body['parent_layer']
+        parent_layer = parent_body['layers'][parent_layer_index]
+        parent_rotation_angle = parent_body.get('rotation_angle', 0.0)
+        parent_patch_positions = calculate_parent_patch_positions(
+            parent_body,
+            parent_layer_index,
+            parent_center,
+            parent_radius,
+            rotation_angle=np.deg2rad(parent_rotation_angle)
+        )
+        num_patches = len(parent_layer['density_profile'][0])
+        placement_angle = (body['placement_angle'] + parent_rotation_angle) % 360
+        patch_index = int((placement_angle / 360.0) * num_patches) % num_patches
+        micro_layer_index = 0
+        external_density = parent_layer['density_profile'][micro_layer_index, patch_index]
+        return external_density
+    else:
+        return 0.0
 # GUI Classes
 
 
@@ -371,8 +419,12 @@ class MaterialBodyCanvas(FigureCanvas):
         self.selected_body = material_object
         self.current_zoom = 1.0
         self.compulsory_increase = 0.01
-        self.cmap = cm.get_cmap('viridis_r')
-        self.show_labels = True  # Added for label visibility
+        # Load saved colorbars and set default
+        self.load_saved_colorbars()
+        self.set_default_colorbar()
+
+        # self.cmap = cm.get_cmap('viridis_r')
+        self.show_labels = False  # Added for label visibility
         self.pan_active = False
         self.pan_start = None
         self.zoom_limits = None
@@ -389,6 +441,70 @@ class MaterialBodyCanvas(FigureCanvas):
         self.mpl_connect('button_release_event', self.end_pan)
         self.mpl_connect('motion_notify_event', self.on_motion)
         self.plot_material_body()
+    def load_saved_colorbars(self):
+        """Load saved colorbars from the colorbars directory"""
+        self.custom_colorbars = {}
+        colorbar_folder = "colorbars"
+        if os.path.exists(colorbar_folder):
+            for filename in os.listdir(colorbar_folder):
+                if filename.endswith('.json'):
+                    full_path = os.path.join(colorbar_folder, filename)
+                    colorbar = ColorBar.load(full_path)
+                    cmap = colorbar.get_matplotlib_colormap()
+                    self.custom_colorbars[colorbar.name] = cmap
+
+    def set_default_colorbar(self):
+        """Set the default colorbar to 'ab' if available"""
+        if 'ab' in self.custom_colorbars:
+            self.cmap = self.custom_colorbars['ab']
+        else:
+            self.cmap = cm.get_cmap('viridis_r')
+    # In MaterialBodyCanvas, add method to zoom to specific body:
+    def zoom_to_body(self, body_name: str) -> None:
+        """Zoom to the extent of the specified body"""
+        def find_body_bounds(body, center=(0,0), radius=1.0):
+            # Get body's bounds
+            bounds = {
+                'xmin': center[0] - radius,
+                'xmax': center[0] + radius,
+                'ymin': center[1] - radius,
+                'ymax': center[1] + radius
+            }
+            
+            # Include child bodies in bounds
+            for child in body.get('child_bodies', []):
+                if 'center' in child and 'radius' in child:
+                    child_bounds = find_body_bounds(child, child['center'], child['radius'])
+                    bounds['xmin'] = min(bounds['xmin'], child_bounds['xmin'])
+                    bounds['xmax'] = max(bounds['xmax'], child_bounds['xmax'])
+                    bounds['ymin'] = min(bounds['ymin'], child_bounds['ymin'])
+                    bounds['ymax'] = max(bounds['ymax'], child_bounds['ymax'])
+            
+            return bounds
+
+        def find_body_and_bounds(body, target_name, center=(0,0), radius=1.0):
+            if body['name'] == target_name:
+                return find_body_bounds(body, center, radius)
+            
+            for child in body.get('child_bodies', []):
+                if 'center' in child and 'radius' in child:
+                    result = find_body_and_bounds(child, target_name, child['center'], child['radius'])
+                    if result:
+                        return result
+            return None
+
+        bounds = find_body_and_bounds(self.material_object, body_name)
+        if bounds:
+            # Add 20% padding around the bounds
+            width = bounds['xmax'] - bounds['xmin']
+            height = bounds['ymax'] - bounds['ymin']
+            padding_x = width * 0.2
+            padding_y = height * 0.2
+            
+            self.ax.set_xlim(bounds['xmin'] - padding_x, bounds['xmax'] + padding_x)
+            self.ax.set_ylim(bounds['ymin'] - padding_y, bounds['ymax'] + padding_y)
+            self.update_limits()
+            self.draw()
 
     def plot_material_body(self):
         self.fig.clear()
@@ -553,6 +669,34 @@ class MaterialBodyCanvas(FigureCanvas):
         child['rotation_angle'] = optimal_rotation % 360
         return optimal_rotation
 
+    # def update_body_and_children(self, body, time_step):
+    #     if not self.arrest_revolutions and 'placement_angle' in body:
+    #         angular_speed = body.get('angular_speed', 0)
+    #         current_placement_angle = body.get('placement_angle', 0)
+    #         new_placement_angle = (current_placement_angle + angular_speed * time_step) % 360
+    #         body['placement_angle'] = new_placement_angle
+    #     if body.get('parent_layer') is not None:
+    #         parent_body = find_parent_body(self.material_object, body)
+    #         if parent_body:
+    #             parent_layer = parent_body['layers'][body['parent_layer']]
+    #             parent_radius = parent_body.get('radius', 1)
+    #             previous_layers_thickness = sum(
+    #                 layer['thickness'] for layer in parent_body['layers'][:body['parent_layer']]
+    #             )
+    #             current_layer_thickness = parent_layer['thickness']
+    #             child_center_radius = parent_radius * (
+    #                 1 - previous_layers_thickness - current_layer_thickness / 2
+    #             )
+    #             placement_angle_rad = np.radians(body['placement_angle'])
+    #             parent_center = parent_body.get('center', (0, 0))
+    #             body['center'] = (
+    #                 parent_center[0] + child_center_radius * np.cos(placement_angle_rad),
+    #                 parent_center[1] + child_center_radius * np.sin(placement_angle_rad)
+    #             )
+    #             body['radius'] = parent_radius * current_layer_thickness / 2
+    #             self.adjust_child_rotation(body, parent_body, time_step)
+    #     for child in body.get('child_bodies', []):
+    #         self.update_body_and_children(child, time_step)
     def update_body_and_children(self, body, time_step):
         if not self.arrest_revolutions and 'placement_angle' in body:
             angular_speed = body.get('angular_speed', 0)
@@ -579,9 +723,14 @@ class MaterialBodyCanvas(FigureCanvas):
                 )
                 body['radius'] = parent_radius * current_layer_thickness / 2
                 self.adjust_child_rotation(body, parent_body, time_step)
+                # Calculate external density
+                external_density = calculate_external_density(body)
+                # Check for shedding
+                check_and_shed_higher_order_bodies(body, external_density)
+                # Update densities if necessary
+                update_child_body_density(parent_body, body, parent_center, parent_radius)
         for child in body.get('child_bodies', []):
             self.update_body_and_children(child, time_step)
-
     def plot_body(
         self,
         ax,
@@ -590,11 +739,19 @@ class MaterialBodyCanvas(FigureCanvas):
         radius: float = 1.0,
         is_child: bool = False,
         parent_rotation: float = 0.0
-    ) -> None:
+        ) -> None:
         layers = material['layers']
         rotation_angle = material.get('rotation_angle', 0.0)
         total_rotation = (rotation_angle + parent_rotation) % 360
         current_radius = radius
+        # Always plot the name at center, regardless of show_labels setting
+        ax.text(
+            center[0], center[1], material['name'], 
+            ha='center', va='center',
+            fontsize=10, fontweight='bold', 
+            color='black', 
+            rotation=total_rotation
+        )
         for i, layer in enumerate(layers):
             layer_thickness = layer['thickness'] * radius
             next_radius = current_radius - layer_thickness
@@ -622,7 +779,7 @@ class MaterialBodyCanvas(FigureCanvas):
                         text_y = center[1] + text_r * np.sin(mid_angle)
                         ax.text(
                             text_x, text_y, f"{j},{k}\n{density:.2f}",
-                            ha='center', va='center', fontsize=6
+                            ha='center', va='center', fontsize=8
                         )
                 collection = PatchCollection(patches, match_original=True)
                 ax.add_collection(collection)
@@ -694,6 +851,16 @@ class MaterialBodySimulator(QMainWindow):
         self.populate_body_selector(self.material_object)
         self.body_selector.currentTextChanged.connect(self.on_body_selected)
         toolbar.addWidget(self.body_selector)
+
+        # Add zoom body selector
+        self.zoom_selector = QComboBox()
+        self.zoom_selector.addItem("Full View")  # Add option for full view
+        self.populate_body_selector(self.material_object, combobox=self.zoom_selector)
+        self.zoom_selector.currentTextChanged.connect(self.on_zoom_body_selected)
+        toolbar.addWidget(QLabel("Zoom to:"))
+        toolbar.addWidget(self.zoom_selector)
+
+
         self.arrest_checkbox = QCheckBox("Arrest Revolutions")
         self.arrest_checkbox.stateChanged.connect(self.toggle_arrest_revolutions)
         toolbar.addWidget(self.arrest_checkbox)
@@ -726,7 +893,19 @@ class MaterialBodySimulator(QMainWindow):
         load_project_action = QAction('Load Project', self)
         load_project_action.triggered.connect(self.load_project)
         toolbar.addAction(load_project_action)
-
+    def on_zoom_body_selected(self, selected_name):
+        """Handle zoom body selection"""
+        if selected_name == "Full View":
+            # Reset to full view
+            self.canvas.ax.set_xlim(-1.5, 1.5)
+            self.canvas.ax.set_ylim(-1.5, 1.5)
+            self.canvas.update_limits()
+            self.canvas.draw()
+        else:
+            # Zoom to selected body
+            self.canvas.zoom_to_body(selected_name.strip())
+    # Modify populate_body_selector to work with both selectors
+    
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.canvas.fig.tight_layout(pad=0)
@@ -850,10 +1029,12 @@ class MaterialBodySimulator(QMainWindow):
             self.populate_body_selector(self.material_object)
             self.canvas.plot_material_body()
 
-    def populate_body_selector(self, body, prefix=''):
-        self.body_selector.addItem(f"{prefix}{body['name']}")
+    def populate_body_selector(self, body, prefix='', combobox=None):
+        if combobox is None:
+            combobox = self.body_selector
+        combobox.addItem(f"{prefix}{body['name']}")
         for child in body.get('child_bodies', []):
-            self.populate_body_selector(child, prefix + '  ')
+            self.populate_body_selector(child, prefix + '  ', combobox)
 
     def on_body_selected(self, selected_name):
         self.selected_body = self.find_body_by_name(self.material_object, selected_name.strip())
@@ -879,9 +1060,10 @@ if __name__ == '__main__':
         "angular_speed": 0.0,
         "rotation_angle": 0.0,
         "rotation_speed": 0.0,
-        "show_label": True,
-        "use_micro_layers": True,
-        "num_micro_layers": 3,
+        "show_label": False,
+        # "use_micro_layers": True,
+        # "num_micro_layers": 3,
+        "can_shed": False,
         "layers": [
             {"thickness": 0.4, "density": 0.2, "num_micro_layers": 6},
             {"thickness": 0.2, "density": 0.3, "num_micro_layers": 2},
@@ -897,16 +1079,81 @@ if __name__ == '__main__':
                 "rotation_speed": 0.0,
                 "name": "B",
                 "color": "#0000dd",
-                "show_label": True,
-                "use_micro_layers": True,
-                "num_micro_layers": 2,
+                "show_label": False,
+                "can_shed": False,
+                # "use_micro_layers": True,
+                # "num_micro_layers": 2,
                 "density_tolerance": 0.001,
                 "layers": [
-                    {"thickness": 0.4, "density": 0.2, "num_micro_layers": 2},
+                    {"thickness": 0.4, "density": 0.2, "num_micro_layers": 6},
                     {"thickness": 0.2, "density": 0.4, "num_micro_layers": 2},
                     {"thickness": 0.2, "density": 0.6, "num_micro_layers": 1},
                 ],
-                "child_bodies": []
+                "child_bodies": [
+                    {
+                        "parent_layer": 0,
+                        "placement_angle": 90,
+                        "angular_speed": 10,
+                        "rotation_angle": 0.0,
+                        "rotation_speed": 0.0,
+                        "name": "C",
+                        "color": "#0000dd",
+                        "show_label": False,
+                        "can_shed": True,
+                        # "use_micro_layers": True,
+                        # "num_micro_layers": 2,
+                        "density_tolerance": 0.001,
+                        "layers": [
+                            {"thickness": 0.4, "density": 0.2, "num_micro_layers": 6},
+                            {"thickness": 0.2, "density": 0.4, "num_micro_layers": 1},
+                            # {"thickness": 0.2, "density": 0.6, "num_micro_layers": 1},
+                        ],
+                        "child_bodies": [
+                            {
+                                "parent_layer": 0,
+                                "placement_angle": 90,
+                                "angular_speed": 10,
+                                "rotation_angle": 0.0,
+                                "rotation_speed": 0.0,
+                                "name": "D",
+                                "color": "#0000dd",
+                                "show_label": False,
+                                "can_shed": True,
+                                # "use_micro_layers": True,
+                                # "num_micro_layers": 2,
+                                "density_tolerance": 0.001,
+                                "layers": [
+                                    {"thickness": 0.4, "density": 0.2, "num_micro_layers": 6},
+                                    {"thickness": 0.2, "density": 0.4, "num_micro_layers": 1},
+                                    # {"thickness": 0.2, "density": 0.6, "num_micro_layers": 1},
+                                ],
+                                "child_bodies": [
+                                    {
+                                        "parent_layer": 0,
+                                        "placement_angle": 90,
+                                        "angular_speed": 10,
+                                        "rotation_angle": 0.0,
+                                        "rotation_speed": 0.0,
+                                        "name": "E",
+                                        "color": "#0000dd",
+                                        "show_label": False,
+                                        "can_shed": False,
+                                        # "use_micro_layers": True,
+                                        # "num_micro_layers": 2,
+                                        "density_tolerance": 0.001,
+                                        "layers": [
+                                            {"thickness": 0.4, "density": 0.2, "num_micro_layers": 2},
+                                            {"thickness": 0.2, "density": 0.4, "num_micro_layers": 1},
+                                            # {"thickness": 0.2, "density": 0.6, "num_micro_layers": 1},
+                                        ],
+                                        "child_bodies": []
+                                    }
+
+                                ]
+                            }
+                        ]
+                    }
+                ]
             }
         ]
     }

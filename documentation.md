@@ -1,213 +1,311 @@
-Material Body Simulator Documentation
-Introduction
-The Material Body Simulator is a Python application that visualizes and simulates the behavior of layered material bodies with rotational dynamics. It allows users to define complex bodies with multiple layers, micro-layers, and child bodies, each with their own physical properties such as density, thickness, and angular velocities. The simulator provides a graphical user interface (GUI) for visualizing the bodies and interacting with them in real-time.
+# Material Body Simulator Documentation
 
-This documentation provides a comprehensive guide to understanding, reproducing, and potentially improving the Material Body Simulator. It covers the code structure, key classes and functions, usage instructions, and suggestions for further enhancements.
+## Table of Contents
+- [Introduction](#introduction)
+- [Installation and Dependencies](#installation-and-dependencies)
+- [Code Structure Overview](#code-structure-overview)
+- [Simulation Mechanics](#simulation-mechanics)
+- [Usage Instructions](#usage-instructions)
+- [Algorithm and Implementation Details](#algorithm-and-implementation-details)
+- [Understanding the Simulation](#understanding-the-simulation)
+- [Potential Improvements](#potential-improvements)
+- [Conclusion](#conclusion)
 
-Table of Contents
-Installation and Dependencies
-Code Structure Overview
-Key Components
-Main Classes
-Utility Functions
-Usage Instructions
-Running the Simulator
-Interacting with the GUI
-Understanding the Simulation
-Material Body Representation
-Dynamics and Rotations
-Potential Improvements
-Conclusion
-Installation and Dependencies
-To run the Material Body Simulator, ensure that you have the following dependencies installed:
+## Introduction
 
-Python 3.8 or later
-PyQt6
-Matplotlib
-NumPy
-Pandas (for utility functions)
-Pickle (for saving/loading projects)
+The Material Body Simulator is a Python application designed to visualize and simulate the behavior of layered material bodies within hierarchical Layered Density Structures (LDS). It models the interactions of bodies with varying densities, rotational dynamics, and adaptation mechanisms like the shedding of higher-order bodies. Users can define complex hierarchical bodies with multiple layers, micro-layers, and child bodies, each possessing unique physical properties such as density, thickness, and angular velocities.
+
+This documentation provides a comprehensive guide to understanding, reproducing, and enhancing the Material Body Simulator. It covers the code structure, key classes and functions, simulation mechanics, usage instructions, and suggestions for future improvements.
+
+## Installation and Dependencies
+
+To run the Material Body Simulator, ensure you have the following dependencies installed:
+
+- Python 3.8 or later
+- PyQt6
+- Matplotlib
+- NumPy
+
 You can install the required packages using pip:
 
-bash
-Copy code
-pip install PyQt6 matplotlib numpy pandas
-Code Structure Overview
-The code is organized into several classes and utility functions:
+```bash
+pip install PyQt6 matplotlib numpy
+```
 
-Main Classes:
+## Code Structure Overview
 
-MaterialBodySimulator: The main application window that orchestrates the simulation.
-MaterialBodyCanvas: Handles the rendering of material bodies using Matplotlib within a PyQt6 widget.
-PropertiesDialog: A dialog window for changing properties of material bodies.
-RotationResult: A data class used to store rotation results.
-Utility Functions: Located in the utils directory (e.g., utils/utils.py, utils/print_util.py), these functions handle calculations and data manipulations required for the simulation.
+### Main Classes
 
-Main Execution Block: At the end of the script, where the material bodies are defined, and the application is launched.
+#### MaterialBodySimulator
+- The main application window orchestrating the simulation
+- Manages the GUI components and user interactions
 
-Key Components
-Main Classes
-1. MaterialBodySimulator
-The MaterialBodySimulator class is the main application window derived from QMainWindow. It sets up the GUI, including the toolbar and the central widget that displays the simulation.
+#### MaterialBodyCanvas
+- Handles rendering of material bodies using Matplotlib within a PyQt6 widget
+- Manages plotting, user interactions like zooming and panning, and updates during the simulation
 
-Key Methods:
+#### PropertiesDialog
+- A dialog window for changing properties of material bodies
+- Allows users to modify attributes like color, angular speeds, and density tolerances
 
-initUI(): Initializes the user interface components.
-create_toolbar(): Creates the toolbar with controls like play/pause, step forward/backward, and property dialogs.
-toggle_animation(): Starts or stops the animation.
-step_animation(): Advances the simulation by one time step.
-open_properties_dialog(): Opens the dialog to change properties of material bodies.
-save_project() / load_project(): Saves or loads the simulation state to/from a file.
-2. MaterialBodyCanvas
-Derived from FigureCanvas, this class handles the plotting of material bodies using Matplotlib. It manages the rendering, user interactions like zooming and panning, and updates during the simulation.
+#### RotationResult
+- A data class used to store rotation results when minimizing density differences
 
-Key Methods:
+### Utility Functions
 
-plot_material_body(): Plots the entire material body structure.
-update_body_and_children(): Updates the states of bodies and their children based on the simulation logic.
-adjust_child_rotation(): Adjusts the rotation of child bodies to minimize density mismatch.
-get_layer_color(): Determines the color of a layer based on its density.
-3. PropertiesDialog
-This dialog allows users to change properties of the material bodies, such as color, parent layer, placement angle, angular speed, density tolerance, and micro-layer settings.
+These functions handle calculations related to densities, rotations, and patch mappings:
 
-Key Methods:
+**Density Initialization and Updates**
+- `initialize_densities()`
+- `update_child_body_density()`
 
-initUI(): Sets up the form layout with controls for each property.
-change_color(): Opens a color picker to change the body's color.
-get_updated_properties(): Retrieves the updated properties after the dialog is accepted.
-4. RotationResult
-A data class used to store the results of finding the optimal rotation angle that minimizes density differences between layers.
+**Position Calculations**
+- `calculate_child_patch_positions()`
+- `calculate_parent_patch_positions()`
+- `calculate_all_patch_centers()`
 
-Attributes:
+**Density Mismatch and Rotation Optimization**
+- `find_optimal_rotation()`
+- `calculate_density_mismatch()`
 
-angles: A list of optimal rotation angles.
-min_diff: The minimum density difference achieved.
-Utility Functions
-These functions handle calculations related to densities, rotations, and patch mappings.
+**Patch Mappings and Nearest Patches**
+- `patch_mappings()`
+- `find_nearest_patches_vectorized()`
 
-Density Initialization and Updates:
+## Simulation Mechanics
 
-init_densities(): Initializes the density profiles for all layers and micro-layers.
-update_child_body_density(): Updates the density of a child body based on its parent.
-Position Calculations:
+### Layered Density Structures (LDS)
+1. **Multi-layered Bodies**: Each material body consists of multiple layers, and each layer can contain multiple micro-layers
+2. **Density Gradient**: Densities increase towards the center of the body; inner layers have higher densities than outer layers
+3. **Density Variations Along Layers**: Densities vary along the layers themselves (tangential variation), represented as patches
 
-calculate_child_patch_positions(): Calculates positions of patches for child bodies.
-calculate_parent_patch_positions(): Calculates positions of patches for parent layers.
-calculate_all_patch_centers(): Calculates centers of all patches for a given layer.
-Density Mismatch and Rotation Optimization:
+### Rotational Adjustments
+- **Optimal Rotation Calculation**: Before updating positions, the program calculates the optimal rotation for the child body to minimize cumulative density differences with the parent layer
+- **Rotation Adjustment**: After applying this rotation, the cumulative density difference is minimized through rotation alone, without further density adjustments
+- **Minimal Density Changes**: This rotational adjustment allows the child body to satisfy the density conditions with minimal changes to its own density distribution
 
-find_optimal_rotation(): Finds the optimal rotation angle to minimize density differences.
-compute_density_mismatch(): Computes the density mismatch between a body and its external environment.
-Patch Mappings and Nearest Patches:
+### Shedding Mechanism
+- **Adaptation to External Density Fields**: Bodies can shed higher-order bodies when moving into regions of higher external density
+- **Density Threshold**: Each body has a `density_threshold` property that determines when shedding should occur
+- **Shedding Process**: When the external density exceeds this threshold and the body can shed (`can_shed` property), it removes its higher-order bodies and adjusts its properties
 
-patch_mappings(): Maps child patches to the nearest parent patches.
-find_nearest_patches_vectorized(): Efficiently finds nearest patches using vectorized operations.
-Printing and Debugging:
+## Usage Instructions
 
-print_patch_positions(): Prints patch positions for debugging.
-print_patch_mappings(): Prints mappings between child and parent patches.
-Usage Instructions
-Running the Simulator
-Ensure Dependencies Are Installed: Install the required packages as mentioned in the Installation and Dependencies section.
+### Running the Simulator
 
-Define Material Bodies:
+1. **Ensure Dependencies Are Installed**
+   - Install the required packages as mentioned in the Installation and Dependencies section
 
-At the end of the script, material bodies are defined in a nested dictionary structure. You can modify this structure to create different simulations.
+2. **Define Material Bodies**
+   - At the end of the script, material bodies are defined in a nested dictionary structure:
 
-python
-Copy code
+```python
 material_object = {
     "name": "A",
     "color": "#00dd00",
     "placement_angle": 90,
-    # ... (other properties)
+    "angular_speed": 0.0,
+    "rotation_angle": 0.0,
+    "rotation_speed": 0.0,
+    "show_label": True,
+    "can_shed": False,
+    "layers": [
+        # Define layers for body A
+    ],
     "child_bodies": [
         {
             "parent_layer": 0,
-            "placement_angle": 90,
-            # ... (other properties)
+            "name": "B",
+            "can_shed": False,
+            "layers": [
+                # Define layers for body B
+            ],
             "child_bodies": [
-                # Define further child bodies if needed
+                # Define further child bodies (e.g., C, D, E)
             ]
         }
     ]
 }
-Run the Script:
+```
 
-Execute the script using Python:
-
-bash
-Copy code
+3. **Run the Script**
+```bash
 python material_body_simulator.py
-Interacting with the GUI
-Toolbar Controls:
+```
 
-Body Selector: Choose which body to focus on.
-Arrest Revolutions Checkbox: Toggle the arrest of revolution movements.
-Play/Pause Button: Start or stop the animation.
-Step Forward Button: Advance the simulation by one time step.
-Step Back Button: Go back one step in the simulation.
-Restart Button: Restart the simulation to its initial state.
-Change Properties: Open the properties dialog to modify body properties.
-Save/Load Project: Save the current simulation state or load a previous one.
-Canvas Interactions:
+### Interacting with the GUI
 
-Zooming: Use the scroll wheel to zoom in and out.
-Panning: Right-click and drag to pan around the canvas.
-Understanding the Simulation
-Material Body Representation
-Bodies and Layers:
+#### Toolbar Controls
+- Body Selector: Choose which body to focus on
+- Arrest Revolutions Checkbox: Toggle the arrest of revolution movements
+- Play/Pause Button: Start or stop the animation
+- Step Forward Button: Advance the simulation by one time step
+- Step Back Button: Go back one step in the simulation
+- Restart Button: Restart the simulation to its initial state
+- Change Properties: Open the properties dialog to modify body properties
+- Save/Load Project: Save the current simulation state or load a previous one
 
-Each material body consists of multiple layers, each with its own thickness, density, and number of micro-layers. Layers are defined in order from outermost to innermost.
+#### Canvas Interactions
+- Zooming: Use the scroll wheel to zoom in and out
+- Panning: Right-click and drag to pan around the canvas
 
-Micro-Layers:
+## Algorithm and Implementation Details
 
-Layers can be subdivided into micro-layers to simulate gradual changes in density. This allows for more precise modeling of material properties.
+### Stage 1: LDS and Rotational Adjustments
 
-Child Bodies:
+#### Key Implementations
 
-Bodies can have child bodies embedded within specific layers. Each child body can also have its own layers and child bodies, allowing for complex hierarchical structures.
+**Layered Density Structures**
+- Bodies consist of multiple layers with densities increasing towards the center
+- Layers can be subdivided into micro-layers for gradual density transitions
+- Density variations are represented through patches along the layers
 
-Dynamics and Rotations
-Placement Angle (placement_angle):
+**Child Body Outer Layer Density**
+- The outer layer density of a child body must always be greater than the parent body's layer density at the point of contact
+- Child bodies adjust their outer layer densities during initialization to satisfy this rule
 
-The angle at which a body is placed relative to its parent. This defines its initial position.
+**Increasing Density in Inner Layers**
+- Inner layer patches have densities greater than adjacent outer layer patches
+- A compulsory increase (tolerance) is applied during initialization to maintain this gradient
 
-Angular Speed (angular_speed):
+**Minimizing Cumulative Density Difference via Rotation**
+- Optimal rotation angles are calculated to minimize density mismatches between child and parent layers
+- Rotation adjustments are applied without altering the densities during the simulation
 
-The speed at which a body revolves around its parent layer.
+#### Simulation Dynamics
 
-Rotation Angle (rotation_angle):
+**Initialization**
+- Densities for each layer and micro-layer are initialized, ensuring they increase towards the center
+- Child bodies adjust their outer layer densities based on the parent layer densities
 
-The body's own rotation angle. This can change to minimize density mismatches with the parent layer.
+**Rotation and Movement**
+- Child bodies have properties like `placement_angle` and `rotation_angle`
+- As a child body moves within the parent body, it must rotate to maintain minimal cumulative density differences
 
-Density Matching:
+**Visualization**
+- Real-time rendering of bodies, layers, micro-layers, and patches
+- Animation of rotations to show how child bodies adjust their orientation
+- Display of density values and variations along layers
+- User interaction through zooming, panning, and property adjustments
 
-The simulation adjusts the rotation of child bodies to minimize the difference in densities between adjacent layers. This is crucial for simulating realistic interactions between materials.
+### Stage 2: Implementing the Shedding Mechanism
 
-Potential Improvements
-Performance Optimization:
+#### Objective
+To extend the simulation by implementing adaptation mechanisms that allow bodies to shed their higher-order bodies when the external density field increases beyond a threshold.
 
-Vectorization: Further optimize calculations using NumPy vectorization to improve performance with larger numbers of patches and micro-layers.
-Parallel Processing: Implement parallel processing for computations that can be executed concurrently.
-User Interface Enhancements:
+#### Key Tasks
 
-Interactive Editing: Allow users to add or modify bodies and layers directly through the GUI.
-Visualization Options: Provide options to change color maps, display settings, or layer visibility.
-Advanced Physical Modeling:
+**Construct Hierarchical Bodies (C, D, E)**
+- Extend the material object hierarchy by adding bodies C, D, and E as nested child bodies
+- Assign properties like `density_threshold` and `can_shed` to control shedding behavior
 
-Dynamic Density Updates: Implement more sophisticated models for density changes over time or due to interactions.
-Collision Detection: Add physics for detecting and responding to collisions between bodies.
-Error Handling and Validation:
+**Initialize Densities for Additional Bodies**
+- Use the existing density initialization functions to set up densities for the new bodies
 
-Input Validation: Ensure that all user inputs are validated to prevent runtime errors.
-Exception Handling: Implement comprehensive exception handling throughout the code.
-Documentation and Testing:
+**Implement Shedding Logic**
+- Develop functions to determine when a body should shed higher-order bodies based on external density
+- Remove higher-order bodies from the `child_bodies` list when shedding occurs
+- Adjust body properties post-shedding, including density profiles and layer radii
 
-Unit Tests: Develop unit tests for key functions to ensure correctness.
-Documentation: Expand the documentation with examples and tutorials.
-Conclusion
-The Material Body Simulator provides a foundation for simulating and visualizing complex material bodies with layered structures and rotational dynamics. By understanding the code structure and key components outlined in this documentation, developers can reproduce the program, extend its functionality, and tailor it to specific simulation needs.
+**Update Body Movements**
+- Ensure bodies C, D, and E update their positions and rotations based on the movements of their parent bodies
+- Account for changes in external density due to parent body movements
 
-Whether for educational purposes, research, or engineering applications, the simulator offers a versatile platform for exploring the interactions of layered materials in a dynamic environment.
+**Adjust Visualization**
+- Modify plotting functions to reflect changes due to shedding
+- Shed bodies are no longer visualized
+- Layer sizes and densities are adjusted to represent updated body properties
 
+#### Algorithm Steps
+
+1. **Extend Material Object Structure**
+   - Add properties `density_threshold` and `can_shed` to bodies C, D, and E
+
+2. **Implement Shedding Functions**
+   - `check_and_shed_higher_order_bodies(body, external_density)`: Determines if shedding should occur
+   - `update_body_properties_after_shedding(body)`: Adjusts the body's properties post-shedding
+
+3. **Calculate External Density**
+   - `calculate_external_density(body)`: Calculates the external density experienced by a body
+
+4. **Modify Update Functions**
+   - Update `update_body_and_children()` to include calls to the shedding logic
+
+5. **Adjust Visualization**
+   - Ensure that shed bodies are no longer plotted
+   - Update layer thicknesses and densities in the visualization
+
+## Understanding the Simulation
+
+### Material Body Representation
+
+#### Bodies and Layers
+- Each material body consists of multiple layers, defined from the outermost to the innermost
+- Layers have properties like thickness, density, and the number of micro-layers
+
+#### Micro-Layers
+- Layers can be subdivided into micro-layers to simulate gradual changes in density
+- This allows for more precise modeling of material properties
+
+#### Child Bodies
+- Bodies can have child bodies embedded within specific layers
+- Each child body can have its own layers and child bodies, creating a hierarchical structure
+
+### Dynamics and Rotations
+
+#### Placement Angle (`placement_angle`)
+- Defines the angle at which a body is placed relative to its parent
+- Determines the body's position within the parent layer
+
+#### Angular Speed (`angular_speed`)
+- The speed at which a body revolves around its parent layer
+
+#### Rotation Angle (`rotation_angle`)
+- The body's own rotation angle
+- Adjusts to minimize density mismatches with the parent layer
+
+#### Density Matching
+- The simulation adjusts the rotation of child bodies to minimize density differences between adjacent layers
+- Crucial for simulating realistic interactions between materials
+
+### Shedding Events
+
+#### Shedding Conditions
+- Occurs when the external density exceeds the body's `density_threshold`
+- The body must have `can_shed` set to `True`
+
+#### Shedding Process
+- The body sheds its higher-order bodies (child bodies)
+- Adjusts its own properties, such as layer thicknesses and densities
+
+#### Effects of Shedding
+- Allows the body to adapt to higher-density regions without violating density rules
+- Shed bodies are no longer visualized in the simulation
+
+## Potential Improvements
+
+### Performance Optimization
+- **Vectorization**: Further optimize calculations using NumPy vectorization
+- **Parallel Processing**: Implement parallel processing for concurrent computations
+
+### User Interface Enhancements
+- **Interactive Editing**: Allow users to add or modify bodies and layers directly through the GUI
+- **Visualization Options**: Provide options to change color maps, display settings, or layer visibility
+
+### Advanced Physical Modeling
+- **Dynamic Density Updates**: Implement models for density changes over time or due to interactions
+- **Collision Detection**: Add physics for detecting and responding to collisions between bodies
+
+### Error Handling and Validation
+- **Input Validation**: Ensure all user inputs are validated to prevent runtime errors
+- **Exception Handling**: Implement comprehensive exception handling throughout the code
+
+### Documentation and Testing
+- **Unit Tests**: Develop unit tests for key functions to ensure correctness
+- **Expanded Documentation**: Provide examples and tutorials
+
+## Conclusion
+
+The Material Body Simulator offers a robust platform for simulating and visualizing complex material bodies within hierarchical layered density structures. By incorporating rotational adjustments and shedding mechanisms, it models the dynamic interactions of bodies in varying density fields.
+
+This documentation provides the necessary understanding to reproduce the program, extend its functionality, and tailor it to specific simulation needs. Whether for educational purposes, research, or engineering applications, the simulator serves as a valuable tool for exploring the interactions of layered materials in a dynamic environment.
