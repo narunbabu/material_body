@@ -47,6 +47,75 @@ def find_optimal_rotation(
 
     return RotationResult(angles=best_angles, min_diff=min_diff)
 
+# def initialize_densities(
+#     body: Dict[str, Any],
+#     num_patches: int,
+#     compulsory_increase: float,
+#     parent_body: Dict[str, Any] = None,
+#     parent_radius: float = 1.0,
+#     parent_center: Tuple[float, float] = (0.0, 0.0)
+#     ) -> None:
+#     for layer_index, layer in enumerate(body['layers']):
+#         num_micro_layers = layer.get('num_micro_layers', 1)
+#         layer_density = layer['density']
+#         total_variation = 0.2  # Total variation across micro-layers (20%)
+#         total_increase = layer_density * total_variation
+#         # Base densities increasing from outer to inner micro-layers
+#         base_densities = np.linspace(
+#             layer_density * (1 - total_variation / 2),
+#             layer_density * (1 + total_variation / 2),
+#             num_micro_layers
+#         )
+#         layer['density_profile'] = np.zeros((num_micro_layers, num_patches))
+#         initial_amplitude = layer_density * 0.05  # Initial amplitude (5% of layer_density)
+#         decay_factor = 0.5  # Amplitude decreases by half each inner micro-layer
+#         for micro_layer_index in range(num_micro_layers):
+#             d_i = base_densities[micro_layer_index]
+#             amplitude = initial_amplitude * (decay_factor ** micro_layer_index)
+#             # Variation function (e.g., sine wave)
+#             variation = np.sin(2 * np.pi * np.arange(num_patches) / num_patches)
+#             density_variation = amplitude * variation
+#             layer['density_profile'][micro_layer_index, :] = d_i + density_variation
+#             # Ensure densities are positive
+#             layer['density_profile'][micro_layer_index, :] = np.maximum(layer['density_profile'][micro_layer_index, :], 0)
+#         # Adjust densities to ensure inner layer patches have densities greater than adjacent outer layer patches
+#         if num_micro_layers > 1:
+#             for micro_layer_index in range(1, num_micro_layers):
+#                 outer_densities = layer['density_profile'][micro_layer_index - 1, :]
+#                 current_densities = layer['density_profile'][micro_layer_index, :]
+#                 # Ensure current densities are greater than outer densities plus a tolerance
+#                 min_increase = compulsory_increase
+#                 adjusted_densities = np.maximum(current_densities, outer_densities + min_increase)
+#                 layer['density_profile'][micro_layer_index, :] = adjusted_densities
+#     # Recursively initialize child bodies
+#     for child in body.get('child_bodies', []):
+#         # Determine the parent layer's densities at the point of contact
+#         parent_layer_index = child['parent_layer']
+#         parent_layer = body['layers'][parent_layer_index]
+#         parent_density_profile = parent_layer['density_profile']
+#         # Adjust the child body's outer layer densities
+#         child_num_patches = num_patches  # Assuming same number of patches
+#         child_outer_layer = child['layers'][0]
+#         child_num_micro_layers = child_outer_layer.get('num_micro_layers', 1)
+#         # Initialize child densities
+#         initialize_densities(
+#             child, num_patches, compulsory_increase,
+#             parent_body=body, parent_radius=parent_radius, parent_center=parent_center
+#         )
+#         # Adjust child outer layer densities to be greater than parent densities at point of contact
+#         parent_densities = parent_density_profile[-1, :]  # Densities at innermost micro-layer of parent layer
+#         child_outer_densities = child_outer_layer['density_profile'][0, :]
+#         min_increase = compulsory_increase  # Tolerance
+#         adjusted_densities = np.maximum(child_outer_densities, parent_densities + min_increase)
+#         child_outer_layer['density_profile'][0, :] = adjusted_densities
+#         # Ensure densities increase towards inner micro-layers in child body
+#         for micro_layer_index in range(1, child_num_micro_layers):
+#             outer_densities = child_outer_layer['density_profile'][micro_layer_index - 1, :]
+#             current_densities = child_outer_layer['density_profile'][micro_layer_index, :]
+#             # Ensure current densities are greater than outer densities plus a tolerance
+#             adjusted_densities = np.maximum(current_densities, outer_densities + min_increase)
+#             child_outer_layer['density_profile'][micro_layer_index, :] = adjusted_densities
+
 def initialize_densities(
     body: Dict[str, Any],
     num_patches: int,
@@ -55,66 +124,38 @@ def initialize_densities(
     parent_radius: float = 1.0,
     parent_center: Tuple[float, float] = (0.0, 0.0)
     ) -> None:
+    """
+    Initialize densities properly handling micro-layers for each layer.
+    """
     for layer_index, layer in enumerate(body['layers']):
         num_micro_layers = layer.get('num_micro_layers', 1)
-        layer_density = layer['density']
-        total_variation = 0.2  # Total variation across micro-layers (20%)
-        total_increase = layer_density * total_variation
-        # Base densities increasing from outer to inner micro-layers
-        base_densities = np.linspace(
-            layer_density * (1 - total_variation / 2),
-            layer_density * (1 + total_variation / 2),
-            num_micro_layers
-        )
         layer['density_profile'] = np.zeros((num_micro_layers, num_patches))
-        initial_amplitude = layer_density * 0.05  # Initial amplitude (5% of layer_density)
-        decay_factor = 0.5  # Amplitude decreases by half each inner micro-layer
+        dl1 = layer['density']
+        dl2 = body['layers'][layer_index + 1]['density'] if layer_index < len(body['layers']) - 1 else dl1
+        increment = (dl2 - dl1) / max(num_micro_layers - 1, 1)
         for micro_layer_index in range(num_micro_layers):
-            d_i = base_densities[micro_layer_index]
-            amplitude = initial_amplitude * (decay_factor ** micro_layer_index)
-            # Variation function (e.g., sine wave)
-            variation = np.sin(2 * np.pi * np.arange(num_patches) / num_patches)
-            density_variation = amplitude * variation
-            layer['density_profile'][micro_layer_index, :] = d_i + density_variation
-            # Ensure densities are positive
-            layer['density_profile'][micro_layer_index, :] = np.maximum(layer['density_profile'][micro_layer_index, :], 0)
-        # Adjust densities to ensure inner layer patches have densities greater than adjacent outer layer patches
-        if num_micro_layers > 1:
-            for micro_layer_index in range(1, num_micro_layers):
-                outer_densities = layer['density_profile'][micro_layer_index - 1, :]
-                current_densities = layer['density_profile'][micro_layer_index, :]
-                # Ensure current densities are greater than outer densities plus a tolerance
-                min_increase = compulsory_increase
-                adjusted_densities = np.maximum(current_densities, outer_densities + min_increase)
-                layer['density_profile'][micro_layer_index, :] = adjusted_densities
+            density = dl1 + micro_layer_index * increment
+            layer['density_profile'][micro_layer_index, :] = density
+
     # Recursively initialize child bodies
     for child in body.get('child_bodies', []):
-        # Determine the parent layer's densities at the point of contact
-        parent_layer_index = child['parent_layer']
-        parent_layer = body['layers'][parent_layer_index]
-        parent_density_profile = parent_layer['density_profile']
-        # Adjust the child body's outer layer densities
-        child_num_patches = num_patches  # Assuming same number of patches
-        child_outer_layer = child['layers'][0]
-        child_num_micro_layers = child_outer_layer.get('num_micro_layers', 1)
-        # Initialize child densities
+        child_outer_radius = parent_radius * (
+            1 - sum(l['thickness'] for l in body['layers'][:child['parent_layer']])
+        )
+        child_inner_radius = parent_radius * (
+            1 - sum(l['thickness'] for l in body['layers'][:child['parent_layer'] + 1])
+        )
+        child_radius = (child_outer_radius + child_inner_radius) / 2
+        child_center_radius = (child_outer_radius + child_inner_radius) / 2
+        child_placement_angle = np.radians(child.get('placement_angle', 0))
+        child_center = (
+            parent_center[0] + child_center_radius * np.cos(child_placement_angle),
+            parent_center[1] + child_center_radius * np.sin(child_placement_angle)
+        )
         initialize_densities(
             child, num_patches, compulsory_increase,
-            parent_body=body, parent_radius=parent_radius, parent_center=parent_center
+            parent_body=body, parent_radius=child_radius, parent_center=child_center
         )
-        # Adjust child outer layer densities to be greater than parent densities at point of contact
-        parent_densities = parent_density_profile[-1, :]  # Densities at innermost micro-layer of parent layer
-        child_outer_densities = child_outer_layer['density_profile'][0, :]
-        min_increase = compulsory_increase  # Tolerance
-        adjusted_densities = np.maximum(child_outer_densities, parent_densities + min_increase)
-        child_outer_layer['density_profile'][0, :] = adjusted_densities
-        # Ensure densities increase towards inner micro-layers in child body
-        for micro_layer_index in range(1, child_num_micro_layers):
-            outer_densities = child_outer_layer['density_profile'][micro_layer_index - 1, :]
-            current_densities = child_outer_layer['density_profile'][micro_layer_index, :]
-            # Ensure current densities are greater than outer densities plus a tolerance
-            adjusted_densities = np.maximum(current_densities, outer_densities + min_increase)
-            child_outer_layer['density_profile'][micro_layer_index, :] = adjusted_densities
 
 def calculate_density_mismatch(
     body: Dict[str, Any],
@@ -288,59 +329,43 @@ def update_child_body_density(
     parent_center: Tuple[float, float] = (0.0, 0.0),
     parent_radius: float = 1.0
     ) -> None:
-    """
-    Update the density of a child body based on its parent.
-
-    Args:
-        parent_body: The parent body.
-        child_body: The child body.
-        parent_center: Center of the parent body.
-        parent_radius: Radius of the parent body.
-    """
-    parent_layer = parent_body['layers'][child_body['parent_layer']]
+    parent_layer_index = child_body['parent_layer']
+    parent_layer = parent_body['layers'][parent_layer_index]
     num_patches = len(parent_layer['density_profile'][0])
-    child_center_radius = parent_radius * (
-        1 - sum(l['thickness'] for l in parent_body['layers'][:child_body['parent_layer']]) -
-        parent_layer['thickness'] / 2
+    # Calculate child center and radius
+    previous_layers_thickness = sum(
+        layer['thickness'] for layer in parent_body['layers'][:parent_layer_index]
     )
-    child_placement_angle = np.radians(child_body['placement_angle'])
+    current_layer_thickness = parent_layer['thickness']
+    child_center_radius = parent_radius * (
+        1 - previous_layers_thickness - current_layer_thickness / 2
+    )
+    placement_angle_rad = np.radians(child_body['placement_angle'])
+    parent_center = parent_body.get('center', (0, 0))
     child_center = (
-        parent_center[0] + child_center_radius * np.cos(child_placement_angle),
-        parent_center[1] + child_center_radius * np.sin(child_placement_angle)
+        parent_center[0] + child_center_radius * np.cos(placement_angle_rad),
+        parent_center[1] + child_center_radius * np.sin(placement_angle_rad)
     )
     child_body['center'] = child_center
-    child_body['radius'] = parent_radius * parent_layer['thickness'] / 2
-    parent_patch_positions = calculate_parent_patch_positions(
-        parent_body,
-        child_body['parent_layer'],
-        parent_center,
-        parent_radius
-    )
-    child_patch_positions = calculate_child_patch_positions(
-        child_body,
-        parent_radius,
-        parent_center
-    )
-    child_patch_mappings = patch_mappings(child_patch_positions, parent_patch_positions)
-    nearest_densities, _, _ = find_nearest_patches_vectorized(
-        child_patch_mappings,
-        parent_patch_positions
-    )
-    for layer_index, child_layer in enumerate(child_body['layers']):
-        num_micro_layers = child_layer.get('num_micro_layers', 1)
-        if layer_index == 0:
-            if 'original_density_profile' not in child_layer:
-                child_layer['original_density_profile'] = child_layer['density_profile'][0:1].copy()
-            child_layer['density_profile'][0] = nearest_densities + 0.01
-            outer_layer_increase = child_layer['density_profile'][0] - child_layer['original_density_profile'][0]
-            if num_micro_layers > 1:
-                child_layer['density_profile'][1:] += outer_layer_increase
-        else:
-            outer_layer_increase = (
-                child_body['layers'][0]['density_profile'][0] -
-                child_body['layers'][0]['original_density_profile'][0]
-            )
-            child_layer['density_profile'] += outer_layer_increase[np.newaxis, :]
+    child_body['radius'] = parent_radius * current_layer_thickness / 2
+    # Adjust child outer layer densities
+    child_outer_layer = child_body['layers'][0]
+    child_num_micro_layers = child_outer_layer.get('num_micro_layers', 1)
+    parent_densities = parent_layer['density_profile'][-1, :]  # Innermost micro-layer of parent layer
+    child_outer_densities = child_outer_layer['density_profile'][0, :]
+    min_increase = 0.01  # Tolerance
+    adjusted_densities = np.maximum(child_outer_densities, parent_densities + min_increase)
+    child_outer_layer['density_profile'][0, :] = adjusted_densities
+    # Ensure densities increase towards inner micro-layers in child body
+    for micro_layer_index in range(1, child_num_micro_layers):
+        outer_densities = child_outer_layer['density_profile'][micro_layer_index - 1, :]
+        current_densities = child_outer_layer['density_profile'][micro_layer_index, :]
+        # Ensure current densities are greater than outer densities plus a tolerance
+        adjusted_densities = np.maximum(current_densities, outer_densities + min_increase)
+        child_outer_layer['density_profile'][micro_layer_index, :] = adjusted_densities
+    # Recursively update child bodies
+    for child in child_body.get('child_bodies', []):
+        update_child_body_density(child_body, child, parent_center=child_center, parent_radius=child_body['radius'])
 
 def find_parent_body(
     current_body: Dict[str, Any],
@@ -590,7 +615,7 @@ class MaterialBodyCanvas(FigureCanvas):
         radius: float = 1.0,
         is_child: bool = False,
         parent_rotation: float = 0.0
-    ) -> None:
+        ) -> None:
         layers = material['layers']
         rotation_angle = material.get('rotation_angle', 0.0)
         total_rotation = (rotation_angle + parent_rotation) % 360
@@ -655,6 +680,79 @@ class MaterialBodyCanvas(FigureCanvas):
             self.plot_body(
                 ax, child, child_center, child_radius, is_child=True, parent_rotation=total_rotation
             )
+    # def plot_body(
+    #     self,
+    #     ax,
+    #     material: Dict[str, Any],
+    #     center: Tuple[float, float] = (0, 0),
+    #     radius: float = 1.0,
+    #     is_child: bool = False,
+    #     parent_rotation: float = 0.0
+    #     ) -> None:
+    #     """
+    #     Plots a material body on the given axes.
+
+    #     Args:
+    #         ax: Matplotlib axes to plot on.
+    #         material: The material body to plot.
+    #         center: Center coordinates of the body.
+    #         radius: Radius of the body.
+    #         is_child: Whether the body is a child body.
+    #         parent_rotation: Rotation angle inherited from the parent.
+    #     """
+    #     layers = material['layers']
+    #     rotation_angle = material.get('rotation_angle', 0.0)
+    #     total_rotation = (rotation_angle + parent_rotation) % 360
+    #     current_radius = radius
+    #     for i, layer in enumerate(layers):
+    #         layer_thickness = layer['thickness'] * radius
+    #         next_radius = current_radius - layer_thickness
+    #         num_micro_layers = layer.get('num_micro_layers', 1)
+    #         num_patches = self.num_patches
+    #         micro_layer_thickness = layer_thickness / num_micro_layers
+    #         for j in range(num_micro_layers):
+    #             r = current_radius - j * micro_layer_thickness
+    #             patches = []
+    #             for k in range(num_patches):
+    #                 start_angle = (k * 360 / num_patches + total_rotation) % 360
+    #                 end_angle = ((k + 1) * 360 / num_patches + total_rotation) % 360
+    #                 density = layer['density_profile'][j, k]
+    #                 color = self.get_layer_color(density)
+    #                 wedge = Wedge(
+    #                     center, r, start_angle, end_angle,
+    #                     width=micro_layer_thickness, facecolor=color, edgecolor='none'
+    #                 )
+    #                 patches.append(wedge)
+    #             collection = PatchCollection(patches, match_original=True)
+    #             ax.add_collection(collection)
+    #         current_radius = next_radius
+    #     outer_circle = Circle(center, radius, fill=False, edgecolor='black', linewidth=2)
+    #     ax.add_artist(outer_circle)
+    #     ax.text(
+    #         center[0], center[1], material['name'], ha='center', va='center',
+    #         fontsize=10, fontweight='bold', color='black', rotation=total_rotation
+    #     )
+    #     if 'rotation_angle' in material:
+    #         marker_angle = np.radians(total_rotation)
+    #         marker_radius = radius * 0.8
+    #         marker_x = center[0] + marker_radius * np.cos(marker_angle)
+    #         marker_y = center[1] + marker_radius * np.sin(marker_angle)
+    #         ax.plot([center[0], marker_x], [center[1], marker_y], color='red', linewidth=2)
+    #     for child in material.get('child_bodies', []):
+    #         parent_layer = child['parent_layer']
+    #         placement_angle = (child['placement_angle'] + total_rotation) % 360
+    #         parent_layers = layers[:parent_layer + 1]
+    #         parent_outer_radius = radius - sum(layer['thickness'] for layer in layers[:parent_layer]) * radius
+    #         parent_inner_radius = radius - sum(layer['thickness'] for layer in parent_layers) * radius
+    #         child_radius = (parent_outer_radius - parent_inner_radius) / 2
+    #         child_center_radius = (parent_outer_radius + parent_inner_radius) / 2
+    #         child_center = (
+    #             center[0] + child_center_radius * np.cos(np.radians(placement_angle)),
+    #             center[1] + child_center_radius * np.sin(np.radians(placement_angle))
+    #         )
+    #         self.plot_body(
+    #             ax, child, child_center, child_radius, is_child=True, parent_rotation=total_rotation
+    #         )
 
 class MaterialBodySimulator(QMainWindow):
     """
@@ -803,9 +901,17 @@ class MaterialBodySimulator(QMainWindow):
     def open_edit_bodies_dialog(self):
         dialog = EditBodiesDialog(self.material_object, self)
         if dialog.exec():
-            # You would need to implement updating the material_object based on the dialog's output.
-            # For now, we'll just refresh the plot.
-            self.mindful_plot()
+            # Re-initialize densities after changes
+            initialize_densities(self.material_object, self.canvas.num_patches, self.canvas.compulsory_increase)
+            # Update densities for child bodies
+            for child in self.material_object.get('child_bodies', []):
+                update_child_body_density(self.material_object, child)
+            # Update density range and re-plot
+            self.canvas.min_density, self.canvas.max_density = self.canvas.get_density_range(self.material_object)
+            self.canvas.plot_material_body()
+            # Re-populate the body selector
+            self.body_selector.clear()
+            self.populate_body_selector(self.material_object)
 
     def open_visualization_settings(self):
         dialog = VisualizationSettingsDialog(self.canvas, self)
@@ -868,7 +974,6 @@ class MaterialBodySimulator(QMainWindow):
             if result:
                 return result
         return None
-
 
 if __name__ == '__main__':
     # Define your material object with bodies A, B, C

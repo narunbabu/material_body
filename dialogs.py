@@ -5,35 +5,25 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QWidget, QToolBar, QColorDialog,
     QComboBox, QPushButton, QDialog, QFormLayout, QLabel,QListWidget,
     QSpinBox, QDoubleSpinBox, QDialogButtonBox, QHBoxLayout, QCheckBox,QMessageBox,
-    QFileDialog, QSizePolicy,  QMenu,     QDialogButtonBox,QInputDialog,
+    QFileDialog, QSizePolicy,  QMenu,     QInputDialog,
     QStyledItemDelegate, QStyle
 )
-from PyQt6.QtGui import QAction, QColor, QPainter, QPen
-from PyQt6.QtCore import QTimer, QRect, Qt, QSize, QRectF, QPointF
+from PyQt6.QtGui import QAction, QColor, QPainter, QPen, QLinearGradient
+from PyQt6.QtCore import QTimer, QRect, Qt, QSize, QRectF, QPointF, pyqtSignal
 from PyQt6.QtCore import pyqtSignal
+
+from PyQt6.QtWidgets import (     QLineEdit,QCompleter, QCheckBox,   QTreeWidget, QTreeWidgetItem, QGroupBox)
+
+
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from copy import deepcopy
 import os, sys
 import json
 from matplotlib.colors import ListedColormap  # Add this import at the top
-import os
-import json
-import numpy as np
-
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QVBoxLayout, QWidget, QToolBar, QColorDialog,
-    QComboBox, QPushButton, QDialog, QFormLayout, QLabel, QListWidget, QLineEdit,
-    QSpinBox, QDoubleSpinBox, QDialogButtonBox, QHBoxLayout, QCheckBox, QMessageBox,
-    QFileDialog, QSizePolicy, QMenu, QStyledItemDelegate, QStyle, QCompleter
-)
-from PyQt6.QtGui import QAction, QColor, QPainter, QPen, QLinearGradient
-from PyQt6.QtCore import QTimer, QRect, Qt, QSize, QRectF, QPointF, pyqtSignal
-
-import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
 import matplotlib
-from copy import deepcopy
+
+
 
 class ColorStop:
     def __init__(self, position, color):
@@ -971,36 +961,296 @@ class PropertiesDialog(QDialog):
             body['show_label'] = self.label_checkboxes[name].isChecked()
         return self.bodies
 
-class EditBodiesDialog(QDialog):
-    """
-    Dialog window for adding or modifying bodies and layers.
-    """
 
+
+class EditBodiesDialog(QDialog):
     def __init__(self, material_object, parent=None):
         super().__init__(parent)
+        self.setWindowTitle("Edit Bodies and Layers")
         self.material_object = material_object
         self.init_ui()
 
     def init_ui(self):
-        self.setWindowTitle("Edit Bodies and Layers")
-        self.setMinimumWidth(600)
-        self.setMinimumHeight(400)
-        layout = QVBoxLayout()
+        self.layout = QVBoxLayout(self)
+        # Create the tree widget to display bodies and layers
+        self.tree_widget = QTreeWidget()
+        self.tree_widget.setHeaderLabels(["Name", "Type"])
+        self.layout.addWidget(self.tree_widget)
+        # Populate the tree with the material object
+        self.populate_tree()
+        # Create buttons for adding/deleting bodies and layers
+        button_layout = QHBoxLayout()
+        self.add_body_button = QPushButton("Add Body")
+        self.add_layer_button = QPushButton("Add Layer")
+        self.delete_button = QPushButton("Delete")
+        self.save_button = QPushButton("Save Changes")
+        self.cancel_button = QPushButton("Cancel")
+        button_layout.addWidget(self.add_body_button)
+        button_layout.addWidget(self.add_layer_button)
+        button_layout.addWidget(self.delete_button)
+        button_layout.addStretch()
+        button_layout.addWidget(self.save_button)
+        button_layout.addWidget(self.cancel_button)
+        self.layout.addLayout(button_layout)
+        # Connect signals to slots
+        self.tree_widget.itemClicked.connect(self.on_item_clicked)
+        self.add_body_button.clicked.connect(self.add_body)
+        self.add_layer_button.clicked.connect(self.add_layer)
+        self.delete_button.clicked.connect(self.delete_item)
+        self.save_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+        # Create the property editor area
+        self.property_editor = QGroupBox("Properties")
+        self.property_layout = QFormLayout()
+        self.property_editor.setLayout(self.property_layout)
+        self.layout.addWidget(self.property_editor)
+        self.current_item = None
 
-        # Here you would implement the GUI elements for editing bodies and layers.
-        # This could include tree views, forms, buttons for adding/removing bodies and layers, etc.
+    def populate_tree(self):
+        self.tree_widget.clear()
+        self.add_body_to_tree(self.material_object, None)
 
-        # For simplicity, we'll just display a label indicating this feature.
-        layout.addWidget(QLabel("Interactive editing of bodies and layers is under development."))
+    def add_body_to_tree(self, body, parent_item):
+        body_item = QTreeWidgetItem()
+        body_item.setText(0, body['name'])
+        body_item.setText(1, 'Body')
+        body_item.setData(0, Qt.ItemDataRole.UserRole, body)
+        if parent_item:
+            parent_item.addChild(body_item)
+        else:
+            self.tree_widget.addTopLevelItem(body_item)
+        # Add layers to the body in the tree
+        for idx, layer in enumerate(body['layers']):
+            layer_item = QTreeWidgetItem()
+            layer_item.setText(0, f"Layer {idx}")
+            layer_item.setText(1, 'Layer')
+            layer_item.setData(0, Qt.ItemDataRole.UserRole, (layer, body))
+            body_item.addChild(layer_item)
+        # Recursively add child bodies
+        for child_body in body.get('child_bodies', []):
+            self.add_body_to_tree(child_body, body_item)
 
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        self.setLayout(layout)
+    def on_item_clicked(self, item, column):
+        self.current_item = item
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        # Clear the property editor
+        while self.property_layout.count():
+            child = self.property_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        # Determine whether a body or layer is selected and display properties
+        if item.text(1) == 'Body':
+            body = data
+            self.edit_body_properties(body)
+        elif item.text(1) == 'Layer':
+            layer, parent_body = data
+            self.edit_layer_properties(layer, parent_body)
 
-        # Note: Implementing full interactive editing would require a substantial amount of code,
-        # including handling user inputs, updating the material_object structure, and refreshing the canvas.
+    def edit_body_properties(self, body):
+        self.current_body = body
+        # Create input fields for body properties
+        self.name_edit = QLineEdit(body.get('name', ''))
+        self.color_button = QPushButton()
+        self.color_button.setStyleSheet(f"background-color: {body.get('color', '#FFFFFF')}")
+        self.color_button.clicked.connect(self.choose_color)
+        self.placement_angle_spin = QDoubleSpinBox()
+        self.placement_angle_spin.setRange(0, 360)
+        self.placement_angle_spin.setValue(body.get('placement_angle', 0.0))
+        self.angular_speed_spin = QDoubleSpinBox()
+        self.angular_speed_spin.setRange(-360, 360)
+        self.angular_speed_spin.setValue(body.get('angular_speed', 0.0))
+        self.rotation_angle_spin = QDoubleSpinBox()
+        self.rotation_angle_spin.setRange(0, 360)
+        self.rotation_angle_spin.setValue(body.get('rotation_angle', 0.0))
+        self.rotation_speed_spin = QDoubleSpinBox()
+        self.rotation_speed_spin.setRange(-360, 360)
+        self.rotation_speed_spin.setValue(body.get('rotation_speed', 0.0))
+        self.show_label_checkbox = QCheckBox()
+        self.show_label_checkbox.setChecked(body.get('show_label', True))
+        self.use_micro_layers_checkbox = QCheckBox()
+        self.use_micro_layers_checkbox.setChecked(body.get('use_micro_layers', True))
+        self.num_micro_layers_spin = QSpinBox()
+        self.num_micro_layers_spin.setValue(body.get('num_micro_layers', 1))
+        # Add widgets to property layout
+        self.property_layout.addRow("Name:", self.name_edit)
+        self.property_layout.addRow("Color:", self.color_button)
+        self.property_layout.addRow("Placement Angle:", self.placement_angle_spin)
+        self.property_layout.addRow("Angular Speed:", self.angular_speed_spin)
+        self.property_layout.addRow("Rotation Angle:", self.rotation_angle_spin)
+        self.property_layout.addRow("Rotation Speed:", self.rotation_speed_spin)
+        self.property_layout.addRow("Show Label:", self.show_label_checkbox)
+        self.property_layout.addRow("Use Micro Layers:", self.use_micro_layers_checkbox)
+        self.property_layout.addRow("Number of Micro Layers:", self.num_micro_layers_spin)
+        # If the body has a parent_layer, display it
+        if 'parent_layer' in body:
+            self.parent_layer_spin = QSpinBox()
+            self.parent_layer_spin.setValue(body['parent_layer'])
+            self.property_layout.addRow("Parent Layer:", self.parent_layer_spin)
+        else:
+            self.parent_layer_spin = None
 
+    def choose_color(self):
+        color = QColorDialog.getColor()
+        if color.isValid():
+            self.color_button.setStyleSheet(f"background-color: {color.name()}")
+            self.current_body['color'] = color.name()
+
+    def edit_layer_properties(self, layer, parent_body):
+        self.current_layer = layer
+        self.parent_body = parent_body
+        # Create input fields for layer properties
+        self.thickness_spin = QDoubleSpinBox()
+        self.thickness_spin.setDecimals(4)
+        self.thickness_spin.setSingleStep(0.01)
+        self.thickness_spin.setRange(0.0, 1.0)
+        self.thickness_spin.setValue(layer.get('thickness', 0.1))
+        self.density_spin = QDoubleSpinBox()
+        self.density_spin.setDecimals(4)
+        self.density_spin.setSingleStep(0.01)
+        self.density_spin.setRange(0.0, 1000.0)
+        self.density_spin.setValue(layer.get('density', 1.0))
+        self.num_micro_layers_spin = QSpinBox()
+        self.num_micro_layers_spin.setValue(layer.get('num_micro_layers', 1))
+        # Add widgets to property layout
+        self.property_layout.addRow("Thickness:", self.thickness_spin)
+        self.property_layout.addRow("Density:", self.density_spin)
+        self.property_layout.addRow("Number of Micro Layers:", self.num_micro_layers_spin)
+
+    def add_body(self):
+        # Determine the parent body and parent layer from the selected item
+        selected_item = self.tree_widget.currentItem()
+        if not selected_item:
+            QMessageBox.warning(self, "No Selection", "Please select a parent body or layer to add a child body.")
+            return
+        if selected_item.text(1) == 'Body':
+            parent_body = selected_item.data(0, Qt.ItemDataRole.UserRole)
+            parent_layer = None
+        elif selected_item.text(1) == 'Layer':
+            layer, parent_body = selected_item.data(0, Qt.ItemDataRole.UserRole)
+            parent_layer = parent_body['layers'].index(layer)
+        else:
+            QMessageBox.warning(self, "Invalid Selection", "Please select a parent body or layer.")
+            return
+        # Create a new body with default properties
+        new_body = {
+            "name": "New Body",
+            "color": "#0000dd",
+            "placement_angle": 0.0,
+            "angular_speed": 0.0,
+            "rotation_angle": 0.0,
+            "rotation_speed": 0.0,
+            "show_label": True,
+            "use_micro_layers": True,
+            "num_micro_layers": 1,
+            "layers": [],
+            "child_bodies": []
+        }
+        new_body['parent_layer'] = parent_layer if parent_layer is not None else 0
+        # Append the new body to the parent body's child_bodies list
+        parent_body.setdefault('child_bodies', []).append(new_body)
+        # Add the new body to the tree
+        parent_item = selected_item if selected_item.text(1) == 'Body' else selected_item.parent()
+        new_body_item = QTreeWidgetItem()
+        new_body_item.setText(0, new_body['name'])
+        new_body_item.setText(1, 'Body')
+        new_body_item.setData(0, Qt.ItemDataRole.UserRole, new_body)
+        parent_item.addChild(new_body_item)
+        self.tree_widget.expandItem(parent_item)
+
+    def add_layer(self):
+        # Determine the parent body from the selected item
+        selected_item = self.tree_widget.currentItem()
+        if not selected_item:
+            QMessageBox.warning(self, "No Selection", "Please select a body to add a layer.")
+            return
+        if selected_item.text(1) == 'Body':
+            parent_body = selected_item.data(0, Qt.ItemDataRole.UserRole)
+        elif selected_item.text(1) == 'Layer':
+            layer, parent_body = selected_item.data(0, Qt.ItemDataRole.UserRole)
+        else:
+            QMessageBox.warning(self, "Invalid Selection", "Please select a body to add a layer.")
+            return
+        # Create a new layer with default properties
+        new_layer = {
+            "thickness": 0.1,
+            "density": 1.0,
+            "num_micro_layers": 1
+        }
+        parent_body['layers'].append(new_layer)
+        # Add the new layer to the tree
+        body_item = selected_item if selected_item.text(1) == 'Body' else selected_item.parent()
+        new_layer_item = QTreeWidgetItem()
+        new_layer_item.setText(0, f"Layer {len(parent_body['layers']) - 1}")
+        new_layer_item.setText(1, 'Layer')
+        new_layer_item.setData(0, Qt.ItemDataRole.UserRole, (new_layer, parent_body))
+        body_item.addChild(new_layer_item)
+        self.tree_widget.expandItem(body_item)
+        # Update layer names
+        self.update_layer_names(body_item, parent_body)
+
+    def delete_item(self):
+        selected_item = self.tree_widget.currentItem()
+        if not selected_item:
+            QMessageBox.warning(self, "No Selection", "Please select an item to delete.")
+            return
+        reply = QMessageBox.question(self, 'Delete', 'Are you sure you want to delete this item?', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.No:
+            return
+        if selected_item.text(1) == 'Body':
+            body = selected_item.data(0, Qt.ItemDataRole.UserRole)
+            parent_item = selected_item.parent()
+            if parent_item:
+                parent_body = parent_item.data(0, Qt.ItemDataRole.UserRole)
+                parent_body['child_bodies'].remove(body)
+            else:
+                QMessageBox.warning(self, "Cannot Delete", "Cannot delete the root body.")
+                return
+        elif selected_item.text(1) == 'Layer':
+            layer, parent_body = selected_item.data(0, Qt.ItemDataRole.UserRole)
+            parent_body['layers'].remove(layer)
+            # Update layer names
+            body_item = selected_item.parent()
+            self.update_layer_names(body_item, parent_body)
+        else:
+            QMessageBox.warning(self, "Invalid Selection", "Please select a body or layer to delete.")
+            return
+        # Remove the item from the tree
+        parent = selected_item.parent()
+        if parent:
+            parent.removeChild(selected_item)
+        else:
+            self.tree_widget.takeTopLevelItem(self.tree_widget.indexOfTopLevelItem(selected_item))
+
+    def update_layer_names(self, body_item, body):
+        # Update the names of layers under the specified body in the tree
+        layer_count = 0
+        for i in range(body_item.childCount()):
+            child_item = body_item.child(i)
+            if child_item.text(1) == 'Layer':
+                child_item.setText(0, f"Layer {layer_count}")
+                layer_count += 1
+
+    def accept(self):
+        # Update the properties of the current item before closing
+        if self.current_item:
+            if self.current_item.text(1) == 'Body':
+                body = self.current_item.data(0, Qt.ItemDataRole.UserRole)
+                body['name'] = self.name_edit.text()
+                body['placement_angle'] = self.placement_angle_spin.value()
+                body['angular_speed'] = self.angular_speed_spin.value()
+                body['rotation_angle'] = self.rotation_angle_spin.value()
+                body['rotation_speed'] = self.rotation_speed_spin.value()
+                body['show_label'] = self.show_label_checkbox.isChecked()
+                body['use_micro_layers'] = self.use_micro_layers_checkbox.isChecked()
+                body['num_micro_layers'] = self.num_micro_layers_spin.value()
+                if self.parent_layer_spin is not None:
+                    body['parent_layer'] = self.parent_layer_spin.value()
+                # Update the tree item text if the name has changed
+                self.current_item.setText(0, body['name'])
+            elif self.current_item.text(1) == 'Layer':
+                layer, parent_body = self.current_item.data(0, Qt.ItemDataRole.UserRole)
+                layer['thickness'] = self.thickness_spin.value()
+                layer['density'] = self.density_spin.value()
+                layer['num_micro_layers'] = self.num_micro_layers_spin.value()
+        # Close the dialog
+        super().accept()
