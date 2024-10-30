@@ -46,75 +46,12 @@ def find_optimal_rotation(
             best_angles = [angle]
 
     return RotationResult(angles=best_angles, min_diff=min_diff)
+def update_all_child_densities(parent_body, parent_center=(0.0, 0.0), parent_radius=1.0):
+    for child in parent_body.get('child_bodies', []):
+        update_child_body_density(parent_body, child, parent_center, parent_radius)
+        # Now recursively call for this child's children
+        update_all_child_densities(child, child['center'], child['radius'])
 
-# def initialize_densities(
-#     body: Dict[str, Any],
-#     num_patches: int,
-#     compulsory_increase: float,
-#     parent_body: Dict[str, Any] = None,
-#     parent_radius: float = 1.0,
-#     parent_center: Tuple[float, float] = (0.0, 0.0)
-#     ) -> None:
-#     for layer_index, layer in enumerate(body['layers']):
-#         num_micro_layers = layer.get('num_micro_layers', 1)
-#         layer_density = layer['density']
-#         total_variation = 0.2  # Total variation across micro-layers (20%)
-#         total_increase = layer_density * total_variation
-#         # Base densities increasing from outer to inner micro-layers
-#         base_densities = np.linspace(
-#             layer_density * (1 - total_variation / 2),
-#             layer_density * (1 + total_variation / 2),
-#             num_micro_layers
-#         )
-#         layer['density_profile'] = np.zeros((num_micro_layers, num_patches))
-#         initial_amplitude = layer_density * 0.05  # Initial amplitude (5% of layer_density)
-#         decay_factor = 0.5  # Amplitude decreases by half each inner micro-layer
-#         for micro_layer_index in range(num_micro_layers):
-#             d_i = base_densities[micro_layer_index]
-#             amplitude = initial_amplitude * (decay_factor ** micro_layer_index)
-#             # Variation function (e.g., sine wave)
-#             variation = np.sin(2 * np.pi * np.arange(num_patches) / num_patches)
-#             density_variation = amplitude * variation
-#             layer['density_profile'][micro_layer_index, :] = d_i + density_variation
-#             # Ensure densities are positive
-#             layer['density_profile'][micro_layer_index, :] = np.maximum(layer['density_profile'][micro_layer_index, :], 0)
-#         # Adjust densities to ensure inner layer patches have densities greater than adjacent outer layer patches
-#         if num_micro_layers > 1:
-#             for micro_layer_index in range(1, num_micro_layers):
-#                 outer_densities = layer['density_profile'][micro_layer_index - 1, :]
-#                 current_densities = layer['density_profile'][micro_layer_index, :]
-#                 # Ensure current densities are greater than outer densities plus a tolerance
-#                 min_increase = compulsory_increase
-#                 adjusted_densities = np.maximum(current_densities, outer_densities + min_increase)
-#                 layer['density_profile'][micro_layer_index, :] = adjusted_densities
-#     # Recursively initialize child bodies
-#     for child in body.get('child_bodies', []):
-#         # Determine the parent layer's densities at the point of contact
-#         parent_layer_index = child['parent_layer']
-#         parent_layer = body['layers'][parent_layer_index]
-#         parent_density_profile = parent_layer['density_profile']
-#         # Adjust the child body's outer layer densities
-#         child_num_patches = num_patches  # Assuming same number of patches
-#         child_outer_layer = child['layers'][0]
-#         child_num_micro_layers = child_outer_layer.get('num_micro_layers', 1)
-#         # Initialize child densities
-#         initialize_densities(
-#             child, num_patches, compulsory_increase,
-#             parent_body=body, parent_radius=parent_radius, parent_center=parent_center
-#         )
-#         # Adjust child outer layer densities to be greater than parent densities at point of contact
-#         parent_densities = parent_density_profile[-1, :]  # Densities at innermost micro-layer of parent layer
-#         child_outer_densities = child_outer_layer['density_profile'][0, :]
-#         min_increase = compulsory_increase  # Tolerance
-#         adjusted_densities = np.maximum(child_outer_densities, parent_densities + min_increase)
-#         child_outer_layer['density_profile'][0, :] = adjusted_densities
-#         # Ensure densities increase towards inner micro-layers in child body
-#         for micro_layer_index in range(1, child_num_micro_layers):
-#             outer_densities = child_outer_layer['density_profile'][micro_layer_index - 1, :]
-#             current_densities = child_outer_layer['density_profile'][micro_layer_index, :]
-#             # Ensure current densities are greater than outer densities plus a tolerance
-#             adjusted_densities = np.maximum(current_densities, outer_densities + min_increase)
-#             child_outer_layer['density_profile'][micro_layer_index, :] = adjusted_densities
 
 def initialize_densities(
     body: Dict[str, Any],
