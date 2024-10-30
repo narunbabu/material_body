@@ -182,29 +182,92 @@ def find_nearest_patches_vectorized(
     ]
     return nearest_densities, micro_layer_indices, patch_indices
 
+# def patch_mappings(
+#     child_patch_positions: Dict[str, Any],
+#     parent_patch_positions: Dict[str, Any],
+#     parent_center:Tuple[float, float],
+#     ) -> Dict[int, List[int]]:
+#     """
+#     Maps child patches to the nearest parent patches.
+
+#     Args:
+#         child_patch_positions: Dictionary containing child patch coordinates and info.
+#         parent_patch_positions: Dictionary containing parent patch coordinates and info.
+
+#     Returns:
+#         Dictionary mapping child patch indices to parent patch information.
+#     """
+#     child_x = child_patch_positions['x_coords'].flatten()
+#     child_y = child_patch_positions['y_coords'].flatten()
+#     child_angles = np.arctan2(child_y, child_x)
+#     parent_x = parent_patch_positions['x_coords']
+#     parent_y = parent_patch_positions['y_coords']
+#     parent_angles = np.arctan2(parent_y, parent_x)
+#     parent_radii = parent_patch_positions['radii']
+#     num_child_patches = len(child_x)
+#     num_parent_micro_layers = len(parent_radii)
+#     layer_boundaries = []
+#     for i in range(num_parent_micro_layers):
+#         current_radius = parent_radii[i]
+#         if i < num_parent_micro_layers - 1:
+#             thickness = abs(parent_radii[i] - parent_radii[i + 1])
+#         else:
+#             thickness = abs(parent_radii[i] - parent_radii[i - 1])
+#         outer_radius = current_radius + thickness / 2
+#         inner_radius = current_radius - thickness / 2
+#         layer_boundaries.append((inner_radius, outer_radius))
+#     mappings = {}
+#     for child_idx in range(num_child_patches):
+#         child_angle = child_angles[child_idx]
+#         child_radial_distance  = np.sqrt((child_x[child_idx]-parent_center[0]) ** 2 + (child_y[child_idx]-parent_center[1]) ** 2)
+#         print(f"child_idx: {child_idx} Ch RD: {child_radial_distance} parent_center: {parent_center}")
+#         micro_layer_idx = None
+#         for idx, (inner_r, outer_r) in enumerate(layer_boundaries):
+#             if inner_r <= child_radial_distance  <= outer_r:
+#                 micro_layer_idx = idx
+#                 break
+#         if micro_layer_idx is None:
+#             distances = [
+#                 min(abs(child_radial_distance  - inner_r), abs(child_radial_distance  - outer_r))
+#                 for inner_r, outer_r in layer_boundaries
+#             ]
+#             micro_layer_idx = np.argmin(distances)
+#         angular_diff = np.abs(np.angle(
+#             np.exp(1j * (parent_angles[micro_layer_idx] - child_angle))
+#         ))
+#         patch_idx = np.argmin(angular_diff)
+#         mappings[child_idx] = [0, micro_layer_idx, patch_idx]
+#     return mappings
+
 def patch_mappings(
     child_patch_positions: Dict[str, Any],
-    parent_patch_positions: Dict[str, Any]
+    parent_patch_positions: Dict[str, Any],
+    parent_center: Tuple[float, float]
     ) -> Dict[int, List[int]]:
     """
-    Maps child patches to the nearest parent patches.
+    Maps child patches to the nearest parent patches using direct distance between patch centers.
 
     Args:
         child_patch_positions: Dictionary containing child patch coordinates and info.
         parent_patch_positions: Dictionary containing parent patch coordinates and info.
+        parent_center: Center coordinates of parent body (x, y)
 
     Returns:
         Dictionary mapping child patch indices to parent patch information.
     """
+    # Get child patch coordinates
     child_x = child_patch_positions['x_coords'].flatten()
     child_y = child_patch_positions['y_coords'].flatten()
-    child_angles = np.arctan2(child_y, child_x)
-    parent_x = parent_patch_positions['x_coords']
+    
+    # Get parent patch coordinates for all micro-layers
+    parent_x = parent_patch_positions['x_coords']  # shape: (num_micro_layers, num_patches)
     parent_y = parent_patch_positions['y_coords']
-    parent_angles = np.arctan2(parent_y, parent_x)
     parent_radii = parent_patch_positions['radii']
+    
     num_child_patches = len(child_x)
     num_parent_micro_layers = len(parent_radii)
+    
+    # Calculate layer boundaries for radial distance check
     layer_boundaries = []
     for i in range(num_parent_micro_layers):
         current_radius = parent_radii[i]
@@ -215,63 +278,76 @@ def patch_mappings(
         outer_radius = current_radius + thickness / 2
         inner_radius = current_radius - thickness / 2
         layer_boundaries.append((inner_radius, outer_radius))
+    
     mappings = {}
     for child_idx in range(num_child_patches):
-        child_angle = child_angles[child_idx]
-        child_radius = np.sqrt(child_x[child_idx] ** 2 + child_y[child_idx] ** 2)
+        # Calculate child patch's radial distance from parent center
+        child_radial_distance = np.sqrt(
+            (child_x[child_idx] - parent_center[0]) ** 2 + 
+            (child_y[child_idx] - parent_center[1]) ** 2
+        )
+        
+        # Find appropriate micro-layer based on radial distance
         micro_layer_idx = None
         for idx, (inner_r, outer_r) in enumerate(layer_boundaries):
-            if inner_r <= child_radius <= outer_r:
+            if inner_r <= child_radial_distance <= outer_r:
                 micro_layer_idx = idx
                 break
+        
         if micro_layer_idx is None:
             distances = [
-                min(abs(child_radius - inner_r), abs(child_radius - outer_r))
+                min(abs(child_radial_distance - inner_r), abs(child_radial_distance - outer_r))
                 for inner_r, outer_r in layer_boundaries
             ]
             micro_layer_idx = np.argmin(distances)
-        angular_diff = np.abs(np.angle(
-            np.exp(1j * (parent_angles[micro_layer_idx] - child_angle))
-        ))
-        patch_idx = np.argmin(angular_diff)
+        
+        # Calculate distances to all patches in the selected micro-layer
+        distances_to_parent_patches = np.sqrt(
+            (parent_x[micro_layer_idx] - child_x[child_idx]) ** 2 +
+            (parent_y[micro_layer_idx] - child_y[child_idx]) ** 2
+        )
+        
+        # Find the closest parent patch
+        patch_idx = np.argmin(distances_to_parent_patches)
+        
         mappings[child_idx] = [0, micro_layer_idx, patch_idx]
+    
     return mappings
+# def calculate_child_patch_positions(
+#     child_body: Dict[str, Any],
+#     parent_radius: float,
+#     parent_center: Tuple[float, float],
+#     rotation_angle: float = 0.0
+#     ) -> Dict[str, Any]:
+#     """
+#     Calculate patch positions for child body's outer layer.
 
-def calculate_child_patch_positions(
-    child_body: Dict[str, Any],
-    parent_radius: float,
-    parent_center: Tuple[float, float],
-    rotation_angle: float = 0.0
-    ) -> Dict[str, Any]:
-    """
-    Calculate patch positions for child body's outer layer.
+#     Args:
+#         child_body: The child body.
+#         parent_radius: Radius of the parent body.
+#         parent_center: Center of the parent body.
+#         rotation_angle: Rotation angle in radians.
 
-    Args:
-        child_body: The child body.
-        parent_radius: Radius of the parent body.
-        parent_center: Center of the parent body.
-        rotation_angle: Rotation angle in radians.
-
-    Returns:
-        Dictionary containing patch positions for the child body.
-    """
-    child_center = child_body['center']
-    child_radius = child_body['radius']
-    num_patches = len(child_body['layers'][0]['density_profile'][0])
-    layer_thicknesses = [layer['thickness'] * child_radius for layer in child_body['layers']]
-    num_micro_layers = 1  # Only outermost micro-layer
-    layer_indices = [0]
-    patch_positions = calculate_all_patch_centers(
-        child_body,
-        child_center,
-        child_radius,
-        layer_thicknesses,
-        num_patches,
-        layer_indices=layer_indices,
-        num_micro_layers=num_micro_layers,
-        rotation_angle=rotation_angle
-    )
-    return patch_positions[0]
+#     Returns:
+#         Dictionary containing patch positions for the child body.
+#     """
+#     child_center = child_body['center']
+#     child_radius = child_body['radius']
+#     num_patches = len(child_body['layers'][0]['density_profile'][0])
+#     layer_thicknesses = [layer['thickness'] * child_radius for layer in child_body['layers']]
+#     num_micro_layers = 1  # Only outermost micro-layer
+#     layer_indices = [0]
+#     patch_positions = calculate_all_patch_centers(
+#         child_body,
+#         child_center,
+#         child_radius,
+#         layer_thicknesses,
+#         num_patches,
+#         layer_indices=layer_indices,
+#         num_micro_layers=num_micro_layers,
+#         rotation_angle=rotation_angle
+#     )
+#     return patch_positions[0]
 
 def calculate_parent_patch_positions(
     parent_body: Dict[str, Any],
@@ -322,16 +398,19 @@ def calculate_parent_patch_positions(
 #     parent_radius: float = 1.0
 #     ) -> None:
 #     """
-#     Update the density of a child body based on its parent.
+#     Recursively update the density of a child body and all its descendants based on their parents.
 
 #     Args:
 #         parent_body: The parent body.
-#         child_body: The child body.
-#         parent_center: Center of the parent body.
+#         child_body: The child body whose density needs to be updated.
+#         parent_center: Center coordinates of the parent body.
 #         parent_radius: Radius of the parent body.
 #     """
+#     # Update the current child body's density based on its parent
 #     parent_layer = parent_body['layers'][child_body['parent_layer']]
 #     num_patches = len(parent_layer['density_profile'][0])
+    
+#     # Calculate child body's position relative to parent
 #     child_center_radius = parent_radius * (
 #         1 - sum(l['thickness'] for l in parent_body['layers'][:child_body['parent_layer']]) -
 #         parent_layer['thickness'] / 2
@@ -343,25 +422,36 @@ def calculate_parent_patch_positions(
 #     )
 #     child_body['center'] = child_center
 #     child_body['radius'] = parent_radius * parent_layer['thickness'] / 2
+
+#     # Calculate densities
 #     parent_patch_positions = calculate_parent_patch_positions(
 #         parent_body,
 #         child_body['parent_layer'],
 #         parent_center,
 #         parent_radius
 #     )
+
 #     child_patch_positions = calculate_child_patch_positions(
 #         child_body,
 #         parent_radius,
 #         parent_center
 #     )
-#     child_patch_mappings = patch_mappings(child_patch_positions, parent_patch_positions)
+#     if child_body['name']=='B':
+#         print(f"Parent patch for child body: {child_body['name']}")
+#         print_patch_positions(parent_patch_positions)
+#         print(f"Child patch for child body: {child_body['name']}")
+#         print_patch_positions(child_patch_positions)
+#     child_patch_mappings = patch_mappings(child_patch_positions, parent_patch_positions, parent_center)
 #     nearest_densities, _, _ = find_nearest_patches_vectorized(
 #         child_patch_mappings,
 #         parent_patch_positions
 #     )
-#     # print(f"\nchild_patch_mappings: \n")
-#     # print(f"child_patch_positions {child_patch_positions}")
-#     # print_patch_mappings(child_patch_positions, parent_patch_positions, child_patch_mappings)
+
+#     print(f"\nchild_patch_mappings for Body {child_body['name']}: \n")
+#     print_patch_mappings(child_patch_positions, parent_patch_positions, child_patch_mappings)
+
+
+#     # Update densities for all layers of the current child body
 #     for layer_index, child_layer in enumerate(child_body['layers']):
 #         num_micro_layers = child_layer.get('num_micro_layers', 1)
 #         if layer_index == 0:
@@ -378,6 +468,14 @@ def calculate_parent_patch_positions(
 #             )
 #             child_layer['density_profile'] += outer_layer_increase[np.newaxis, :]
 
+#     # Recursively update all descendants
+#     for grandchild in child_body.get('child_bodies', []):
+#         update_child_body_density(
+#             child_body,  # This child becomes the parent for its own children
+#             grandchild,
+#             child_center,  # Pass the updated center
+#             child_body['radius']  # Pass the updated radius
+#         )
 def update_child_body_density(
     parent_body: Dict[str, Any],
     child_body: Dict[str, Any],
@@ -402,7 +500,7 @@ def update_child_body_density(
         1 - sum(l['thickness'] for l in parent_body['layers'][:child_body['parent_layer']]) -
         parent_layer['thickness'] / 2
     )
-    child_placement_angle = np.radians(child_body['placement_angle'])
+    child_placement_angle = np.radians(child_body['placement_angle'] + parent_body.get('rotation_angle', 0))
     child_center = (
         parent_center[0] + child_center_radius * np.cos(child_placement_angle),
         parent_center[1] + child_center_radius * np.sin(child_placement_angle)
@@ -410,19 +508,29 @@ def update_child_body_density(
     child_body['center'] = child_center
     child_body['radius'] = parent_radius * parent_layer['thickness'] / 2
 
-    # Calculate densities
+    # Calculate parent patch positions with respect to parent center
     parent_patch_positions = calculate_parent_patch_positions(
         parent_body,
         child_body['parent_layer'],
         parent_center,
         parent_radius
     )
+
+    # Calculate child patch positions with respect to parent center
     child_patch_positions = calculate_child_patch_positions(
         child_body,
         parent_radius,
         parent_center
     )
-    child_patch_mappings = patch_mappings(child_patch_positions, parent_patch_positions)
+
+    # Map patches using the correct parent center
+    child_patch_mappings = patch_mappings(
+        child_patch_positions, 
+        parent_patch_positions,
+        parent_center
+    )
+    print(f"\nchild_patch_mappings for Body {child_body['name']}: \n")
+    print_patch_mappings(child_patch_positions, parent_patch_positions, child_patch_mappings,parent_center,)
     nearest_densities, _, _ = find_nearest_patches_vectorized(
         child_patch_mappings,
         parent_patch_positions
@@ -445,15 +553,61 @@ def update_child_body_density(
             )
             child_layer['density_profile'] += outer_layer_increase[np.newaxis, :]
 
-    # Recursively update all descendants
+    # Print debug information
+    print(f"\nUpdating {child_body['name']} (child of {parent_body['name']})")
+    print(f"Parent center: {parent_center}")
+    print(f"Child center: {child_center}")
+    print(f"Child radius: {child_body['radius']}")
+    print(f"Number of patches mapped: {len(child_patch_mappings)}")
+    print(f"First few density updates: {nearest_densities[:5]}")
+
+    # Recursively update all descendants with the new child center and radius
     for grandchild in child_body.get('child_bodies', []):
         update_child_body_density(
             child_body,  # This child becomes the parent for its own children
             grandchild,
-            child_center,  # Pass the updated center
-            child_body['radius']  # Pass the updated radius
+            child_center,  # Pass the child's center as the new parent center
+            child_body['radius']  # Pass the child's radius as the new parent radius
         )
 
+# Also update the calculate_child_patch_positions function to properly handle parent center
+def calculate_child_patch_positions(
+    child_body: Dict[str, Any],
+    parent_radius: float,
+    parent_center: Tuple[float, float],
+    rotation_angle: float = 0.0
+    ) -> Dict[str, Any]:
+    """
+    Calculate patch positions for child body's outer layer with respect to parent center.
+
+    Args:
+        child_body: The child body.
+        parent_radius: Radius of the parent body.
+        parent_center: Center of the parent body.
+        rotation_angle: Rotation angle in radians.
+
+    Returns:
+        Dictionary containing patch positions for the child body.
+    """
+    child_center = child_body['center']
+    child_radius = child_body['radius']
+    num_patches = len(child_body['layers'][0]['density_profile'][0])
+    layer_thicknesses = [layer['thickness'] * child_radius for layer in child_body['layers']]
+    num_micro_layers = 1  # Only outermost micro-layer
+    layer_indices = [0]
+    
+    # Calculate patch positions relative to parent center
+    patch_positions = calculate_all_patch_centers(
+        child_body,
+        child_center,  # Use child's center, which is already relative to parent
+        child_radius,
+        layer_thicknesses,
+        num_patches,
+        layer_indices=layer_indices,
+        num_micro_layers=num_micro_layers,
+        rotation_angle=rotation_angle
+    )
+    return patch_positions[0]
 def find_parent_body(
     current_body: Dict[str, Any],
     target_body: Dict[str, Any],
@@ -1289,48 +1443,48 @@ if __name__ == '__main__':
                             # {"thickness": 0.2, "density": 0.6, "num_micro_layers": 1},
                         ],
                         "child_bodies": [
-                            {
-                                "parent_layer": 0,
-                                "placement_angle": 90,
-                                "angular_speed": 10,
-                                "rotation_angle": 0.0,
-                                "rotation_speed": 0.0,
-                                "name": "D",
-                                "color": "#0000dd",
-                                "show_label": False,
-                                "can_shed": True,
-                                # "use_micro_layers": True,
-                                # "num_micro_layers": 2,
-                                "density_tolerance": 0.001,
-                                "layers": [
-                                    {"thickness": 0.4, "density": 0.2, "num_micro_layers": 6},
-                                    {"thickness": 0.2, "density": 0.4, "num_micro_layers": 1},
-                                    # {"thickness": 0.2, "density": 0.6, "num_micro_layers": 1},
-                                ],
-                                "child_bodies": [
-                                    {
-                                        "parent_layer": 0,
-                                        "placement_angle": 90,
-                                        "angular_speed": 10,
-                                        "rotation_angle": 0.0,
-                                        "rotation_speed": 0.0,
-                                        "name": "E",
-                                        "color": "#0000dd",
-                                        "show_label": False,
-                                        "can_shed": False,
-                                        # "use_micro_layers": True,
-                                        # "num_micro_layers": 2,
-                                        "density_tolerance": 0.001,
-                                        "layers": [
-                                            {"thickness": 0.4, "density": 0.2, "num_micro_layers": 2},
-                                            {"thickness": 0.2, "density": 0.4, "num_micro_layers": 1},
-                                            # {"thickness": 0.2, "density": 0.6, "num_micro_layers": 1},
-                                        ],
-                                        "child_bodies": []
-                                    }
+                            # {
+                            #     "parent_layer": 0,
+                            #     "placement_angle": 90,
+                            #     "angular_speed": 10,
+                            #     "rotation_angle": 0.0,
+                            #     "rotation_speed": 0.0,
+                            #     "name": "D",
+                            #     "color": "#0000dd",
+                            #     "show_label": False,
+                            #     "can_shed": True,
+                            #     # "use_micro_layers": True,
+                            #     # "num_micro_layers": 2,
+                            #     "density_tolerance": 0.001,
+                            #     "layers": [
+                            #         {"thickness": 0.4, "density": 0.2, "num_micro_layers": 6},
+                            #         {"thickness": 0.2, "density": 0.4, "num_micro_layers": 1},
+                            #         # {"thickness": 0.2, "density": 0.6, "num_micro_layers": 1},
+                            #     ],
+                            #     "child_bodies": [
+                            #         {
+                            #             "parent_layer": 0,
+                            #             "placement_angle": 90,
+                            #             "angular_speed": 10,
+                            #             "rotation_angle": 0.0,
+                            #             "rotation_speed": 0.0,
+                            #             "name": "E",
+                            #             "color": "#0000dd",
+                            #             "show_label": False,
+                            #             "can_shed": False,
+                            #             # "use_micro_layers": True,
+                            #             # "num_micro_layers": 2,
+                            #             "density_tolerance": 0.001,
+                            #             "layers": [
+                            #                 {"thickness": 0.4, "density": 0.2, "num_micro_layers": 2},
+                            #                 {"thickness": 0.2, "density": 0.4, "num_micro_layers": 1},
+                            #                 # {"thickness": 0.2, "density": 0.6, "num_micro_layers": 1},
+                            #             ],
+                            #             "child_bodies": []
+                            #         }
 
-                                ]
-                            }
+                            #     ]
+                            # }
                         ]
                     }
                 ]
