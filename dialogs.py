@@ -73,10 +73,73 @@ class VisualizationSettingsDialog(QDialog):
         color_map_layout.addLayout(cmap_layout)
         layout.addLayout(color_map_layout)
 
-        # Show Labels Checkbox
+        # # Show Labels Checkbox
+        # self.show_labels_checkbox = QCheckBox("Show Labels")
+        # self.show_labels_checkbox.setChecked(self.canvas.show_labels)
+        # layout.addWidget(self.show_labels_checkbox)
+        # Label Settings Group
+        label_group = QGroupBox("Label Settings")
+        label_layout = QVBoxLayout()
+        
+        # Show Labels Master Switch
         self.show_labels_checkbox = QCheckBox("Show Labels")
         self.show_labels_checkbox.setChecked(self.canvas.show_labels)
-        layout.addWidget(self.show_labels_checkbox)
+        label_layout.addWidget(self.show_labels_checkbox)
+        
+        # Label Content Options
+        content_group = QGroupBox("Label Content")
+        content_layout = QVBoxLayout()
+        
+        self.density_checkbox = QCheckBox("Show Density")
+        self.density_checkbox.setChecked(self.canvas.label_settings['show_density'])
+        
+        self.layer_idx_checkbox = QCheckBox("Show Layer Index")
+        self.layer_idx_checkbox.setChecked(self.canvas.label_settings['show_layer_index'])
+        
+        self.micro_layer_checkbox = QCheckBox("Show Micro-layer Index")
+        self.micro_layer_checkbox.setChecked(self.canvas.label_settings['show_micro_layer_index'])
+        
+        self.patch_idx_checkbox = QCheckBox("Show Patch Index")
+        self.patch_idx_checkbox.setChecked(self.canvas.label_settings['show_patch_index'])
+        
+        content_layout.addWidget(self.density_checkbox)
+        content_layout.addWidget(self.layer_idx_checkbox)
+        content_layout.addWidget(self.micro_layer_checkbox)
+        content_layout.addWidget(self.patch_idx_checkbox)
+        
+        content_group.setLayout(content_layout)
+        label_layout.addWidget(content_group)
+        
+        # Font Size Control
+        font_layout = QHBoxLayout()
+        font_layout.addWidget(QLabel("Font Size:"))
+        self.font_size_spin = QSpinBox()
+        self.font_size_spin.setRange(6, 24)
+        self.font_size_spin.setValue(self.canvas.label_settings['font_size'])
+        font_layout.addWidget(self.font_size_spin)
+        label_layout.addLayout(font_layout)
+        
+        # Minimum Width Controls
+        width_layout = QFormLayout()
+        
+        self.min_width_density = QSpinBox()
+        self.min_width_density.setRange(10, 100)
+        self.min_width_density.setValue(self.canvas.label_settings['min_patch_width_density'])
+        width_layout.addRow("Min Width for Density:", self.min_width_density)
+        
+        self.min_width_indices = QSpinBox()
+        self.min_width_indices.setRange(10, 100)
+        self.min_width_indices.setValue(self.canvas.label_settings['min_patch_width_indices'])
+        width_layout.addRow("Min Width for Indices:", self.min_width_indices)
+        
+        self.min_width_all = QSpinBox()
+        self.min_width_all.setRange(10, 100)
+        self.min_width_all.setValue(self.canvas.label_settings['min_patch_width_all'])
+        width_layout.addRow("Min Width for All Labels:", self.min_width_all)
+        
+        label_layout.addLayout(width_layout)
+        label_group.setLayout(label_layout)
+        layout.addWidget(label_group)
 
         # Buttons
         button_box = QDialogButtonBox(
@@ -176,21 +239,65 @@ class VisualizationSettingsDialog(QDialog):
         if current_cmap in items:
             self.cmap_combo.setCurrentText(current_cmap)
 
+    # def apply_changes(self):
+    #     try:
+    #         # Store current view limits
+    #         current_xlim = self.canvas.ax.get_xlim()
+    #         current_ylim = self.canvas.ax.get_ylim()
+            
+    #         # Apply colormap change
+    #         cmap_name = self.cmap_combo.currentText()
+    #         if cmap_name in self.custom_colorbars:
+    #             self.canvas.cmap = self.custom_colorbars[cmap_name]
+    #         else:
+    #             self.canvas.cmap = matplotlib.colormaps[cmap_name]
+            
+    #         # Apply label visibility change
+    #         self.canvas.show_labels = self.show_labels_checkbox.isChecked()
+            
+    #         # Redraw with preserved limits
+    #         self.canvas.plot_material_body()
+    #         self.canvas.ax.set_xlim(current_xlim)
+    #         self.canvas.ax.set_ylim(current_ylim)
+    #         self.canvas.draw()
+            
+    #     except Exception as e:
+    #         QMessageBox.critical(self, "Error", f"Failed to apply changes: {str(e)}")
     def apply_changes(self):
         try:
+            # Store current view limits
+            current_xlim = self.canvas.ax.get_xlim()
+            current_ylim = self.canvas.ax.get_ylim()
+            
+            # Apply colormap change
             cmap_name = self.cmap_combo.currentText()
             if cmap_name in self.custom_colorbars:
                 self.canvas.cmap = self.custom_colorbars[cmap_name]
             else:
-                # Use new style colormap access
                 self.canvas.cmap = matplotlib.colormaps[cmap_name]
             
+            # Apply label visibility changes
             self.canvas.show_labels = self.show_labels_checkbox.isChecked()
+            self.canvas.label_settings.update({
+                'show_density': self.density_checkbox.isChecked(),
+                'show_layer_index': self.layer_idx_checkbox.isChecked(),
+                'show_micro_layer_index': self.micro_layer_checkbox.isChecked(),
+                'show_patch_index': self.patch_idx_checkbox.isChecked(),
+                'font_size': self.font_size_spin.value(),
+                'min_patch_width_density': self.min_width_density.value(),
+                'min_patch_width_indices': self.min_width_indices.value(),
+                'min_patch_width_all': self.min_width_all.value()
+            })
+            
+            # Redraw with preserved limits
             self.canvas.plot_material_body()
+            self.canvas.ax.set_xlim(current_xlim)
+            self.canvas.ax.set_ylim(current_ylim)
+            self.canvas.draw()
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to apply changes: {str(e)}")
-
+            
     def accept(self):
         self.apply_changes()
         super().accept()

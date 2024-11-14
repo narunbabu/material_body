@@ -64,10 +64,15 @@ def initialize_densities(
         num_micro_layers = layer.get('num_micro_layers', 1)
         layer['density_profile'] = np.zeros((num_micro_layers, num_patches))
         dl1 = layer['density']
-        dl2 = body['layers'][layer_index + 1]['density'] if layer_index < len(body['layers']) - 1 else dl1
-        increment = (dl2 - dl1) / max(num_micro_layers - 1, 1)
+        # Ensure that dl2 is greater than dl1 by at least compulsory_increase
+        if layer_index < len(body['layers']) - 1:
+            dl2 = body['layers'][layer_index + 1]['density']
+        else:
+            dl2 = dl1 + compulsory_increase  # If it's the innermost layer, set dl2 accordingly
+
+        increment = (dl2 - dl1) / (num_micro_layers + 1)  # Adjusted increment calculation
         for micro_layer_index in range(num_micro_layers):
-            density = dl1 + micro_layer_index * increment
+            density = dl1 + (micro_layer_index + 1) * increment  # Start from dl1 + increment
             layer['density_profile'][micro_layer_index, :] = density
 
     # Recursively initialize child bodies
@@ -691,12 +696,25 @@ class MaterialBodyCanvas(FigureCanvas):
         self.set_default_colorbar()
 
         # self.cmap = cm.get_cmap('viridis_r')
-        self.show_labels = False  # Added for label visibility
+
         self.pan_active = False
         self.pan_start = None
         self.zoom_limits = None
         self.num_patches = 32  # Number of patches per layer
         self.arrest_revolutions = False
+
+        self.show_labels = False
+        self.label_settings = {
+        'show_density': True,
+        'show_layer_index': True,
+        'show_micro_layer_index': True,
+        'show_patch_index': True,
+        'font_size': 8,
+        'min_patch_width_density': 20,     # minimum pixel width to show density
+        'min_patch_width_indices': 30,     # minimum pixel width to show indices
+        'min_patch_width_all': 40,         # minimum pixel width to show all labels
+        }
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.updateGeometry()
         initialize_densities(self.material_object, self.num_patches, self.compulsory_increase)
@@ -708,6 +726,63 @@ class MaterialBodyCanvas(FigureCanvas):
         self.mpl_connect('button_release_event', self.end_pan)
         self.mpl_connect('motion_notify_event', self.on_motion)
         self.plot_material_body()
+    # def get_visible_label_content(self, density, layer_idx, micro_layer_idx, patch_idx, patch_width_pixels):
+    #     """Determine what labels should be visible based on patch width"""
+    #     if patch_width_pixels < self.label_settings['min_patch_width_density']:
+    #         return ""
+        
+    #     parts = []
+    #     if patch_width_pixels >= self.label_settings['min_patch_width_all']:
+    #         # Show all enabled labels
+    #         if self.label_settings['show_density']:
+    #             parts.append(f"{density:.2f}")
+    #         if self.label_settings['show_layer_index']:
+    #             parts.append(f"L{layer_idx}")
+    #         if self.label_settings['show_micro_layer_index']:
+    #             parts.append(f"M{micro_layer_idx}")
+    #         if self.label_settings['show_patch_index']:
+    #             parts.append(f"P{patch_idx}")
+    #     elif patch_width_pixels >= self.label_settings['min_patch_width_indices']:
+    #         # Show only indices if enabled
+    #         if self.label_settings['show_layer_index']:
+    #             parts.append(f"L{layer_idx}")
+    #         if self.label_settings['show_micro_layer_index']:
+    #             parts.append(f"M{micro_layer_idx}")
+    #     else:
+    #         # Show only density if enabled
+    #         if self.label_settings['show_density']:
+    #             parts.append(f"{density:.2f}")
+        
+    #     return "\n".join(parts)
+    def get_visible_label_content(self, density, layer_idx, micro_layer_idx, patch_idx, patch_width_pixels):
+        """Determine what labels should be visible based on patch width"""
+        if patch_width_pixels < self.label_settings['min_patch_width_density']:
+            return ""
+        
+        parts = []
+        if patch_width_pixels >= self.label_settings['min_patch_width_all']:
+            # Show all enabled labels
+            if self.label_settings['show_density']:
+                parts.append(f"{density:.2f}")
+            if self.label_settings['show_layer_index']:
+                parts.append(f"L{layer_idx}")
+            if self.label_settings['show_micro_layer_index']:
+                parts.append(f"M{micro_layer_idx}")
+            if self.label_settings['show_patch_index']:
+                parts.append(f"P{patch_idx}")
+        elif patch_width_pixels >= self.label_settings['min_patch_width_indices']:
+            # Show only indices if enabled
+            if self.label_settings['show_layer_index']:
+                parts.append(f"L{layer_idx}")
+            if self.label_settings['show_micro_layer_index']:
+                parts.append(f"M{micro_layer_idx}")
+        else:
+            # Show only density if enabled
+            if self.label_settings['show_density']:
+                parts.append(f"{density:.2f}")
+        
+        return "\n".join(parts)
+    
     def load_saved_colorbars(self):
         """Load saved colorbars from the colorbars directory"""
         self.custom_colorbars = {}
@@ -962,6 +1037,46 @@ class MaterialBodyCanvas(FigureCanvas):
         for child in body.get('child_bodies', []):
             self._restore_body_state(child, state)
 
+    # def adjust_child_rotation(self, child, parent, time_step):
+    #     parent_layer_index = child['parent_layer']
+    #     parent_layer = parent['layers'][parent_layer_index]
+    #     num_patches = len(parent_layer['density_profile'][0])
+    #     parent_center = parent.get('center', (0, 0))
+    #     current_placement_angle = child['placement_angle']
+    #     parent_patch_positions = calculate_parent_patch_positions(
+    #         parent,
+    #         parent_layer_index,
+    #         parent_center,
+    #         parent.get('radius', 1),
+    #         rotation_angle=np.deg2rad(parent.get('rotation_angle', 0))
+    #     )
+    #     child_rot_angle = child['rotation_angle']
+    #     rotation_increment = 360.0 / (num_patches * 2)
+    #     test_angles = np.arange(
+    #         child_rot_angle - 3 * rotation_increment,
+    #         child_rot_angle + 5 * rotation_increment,
+    #         rotation_increment
+    #     )
+
+    #     def calculate_density_diff(angle: float) -> float:
+    #         child_patch_positions = calculate_child_patch_positions(
+    #             child,
+    #             parent.get('radius', 1),
+    #             parent_center,
+    #             rotation_angle=np.deg2rad(angle)
+    #         )
+    #         mappings = patch_mappings(child_patch_positions, parent_patch_positions)
+    #         child_densities = child['layers'][0]['density_profile'][0]
+    #         parent_densities, _, _ = find_nearest_patches_vectorized(
+    #             mappings,
+    #             parent_patch_positions
+    #         )
+    #         return np.sum(np.abs(child_densities - parent_densities))
+
+    #     result = find_optimal_rotation(test_angles, calculate_density_diff)
+    #     optimal_rotation = sum(result.angles) / len(result.angles)
+    #     child['rotation_angle'] = optimal_rotation % 360
+    #     return optimal_rotation
     def adjust_child_rotation(self, child, parent, time_step):
         parent_layer_index = child['parent_layer']
         parent_layer = parent['layers'][parent_layer_index]
@@ -990,7 +1105,11 @@ class MaterialBodyCanvas(FigureCanvas):
                 parent_center,
                 rotation_angle=np.deg2rad(angle)
             )
-            mappings = patch_mappings(child_patch_positions, parent_patch_positions)
+            mappings = patch_mappings(
+                child_patch_positions, 
+                parent_patch_positions,
+                parent_center  # Pass the parent_center here
+            )
             child_densities = child['layers'][0]['density_profile'][0]
             parent_densities, _, _ = find_nearest_patches_vectorized(
                 mappings,
@@ -1003,34 +1122,6 @@ class MaterialBodyCanvas(FigureCanvas):
         child['rotation_angle'] = optimal_rotation % 360
         return optimal_rotation
 
-    # def update_body_and_children(self, body, time_step):
-    #     if not self.arrest_revolutions and 'placement_angle' in body:
-    #         angular_speed = body.get('angular_speed', 0)
-    #         current_placement_angle = body.get('placement_angle', 0)
-    #         new_placement_angle = (current_placement_angle + angular_speed * time_step) % 360
-    #         body['placement_angle'] = new_placement_angle
-    #     if body.get('parent_layer') is not None:
-    #         parent_body = find_parent_body(self.material_object, body)
-    #         if parent_body:
-    #             parent_layer = parent_body['layers'][body['parent_layer']]
-    #             parent_radius = parent_body.get('radius', 1)
-    #             previous_layers_thickness = sum(
-    #                 layer['thickness'] for layer in parent_body['layers'][:body['parent_layer']]
-    #             )
-    #             current_layer_thickness = parent_layer['thickness']
-    #             child_center_radius = parent_radius * (
-    #                 1 - previous_layers_thickness - current_layer_thickness / 2
-    #             )
-    #             placement_angle_rad = np.radians(body['placement_angle'])
-    #             parent_center = parent_body.get('center', (0, 0))
-    #             body['center'] = (
-    #                 parent_center[0] + child_center_radius * np.cos(placement_angle_rad),
-    #                 parent_center[1] + child_center_radius * np.sin(placement_angle_rad)
-    #             )
-    #             body['radius'] = parent_radius * current_layer_thickness / 2
-    #             self.adjust_child_rotation(body, parent_body, time_step)
-    #     for child in body.get('child_bodies', []):
-    #         self.update_body_and_children(child, time_step)
     def update_body_and_children(self, body, time_step):
         if not self.arrest_revolutions and 'placement_angle' in body:
             angular_speed = body.get('angular_speed', 0)
@@ -1065,6 +1156,112 @@ class MaterialBodyCanvas(FigureCanvas):
                 update_child_body_density(parent_body, body, parent_center, parent_radius)
         for child in body.get('child_bodies', []):
             self.update_body_and_children(child, time_step)
+    # def plot_body(
+    #     self,
+    #     ax,
+    #     material: Dict[str, Any],
+    #     center: Tuple[float, float] = (0, 0),
+    #     radius: float = 1.0,
+    #     is_child: bool = False,
+    #     parent_rotation: float = 0.0
+    #     ) -> None:
+    #     layers = material['layers']
+    #     rotation_angle = material.get('rotation_angle', 0.0)
+    #     total_rotation = (rotation_angle + parent_rotation) % 360
+    #     current_radius = radius
+    #     # Always plot the name at center, regardless of show_labels setting
+    #     ax.text(
+    #         center[0], center[1], material['name'], 
+    #         ha='center', va='center',
+    #         fontsize=10, fontweight='bold', 
+    #         color='black', 
+    #         rotation=total_rotation
+    #     )
+
+
+    #     # Calculate the approximate pixel width of a patch
+    #     bbox = ax.get_window_extent()
+    #     view_width = bbox.width
+    #     xlim = ax.get_xlim()
+    #     view_scale = view_width / (xlim[1] - xlim[0])
+
+    #     for i, layer in enumerate(layers):
+    #         layer_thickness = layer['thickness'] * radius
+    #         next_radius = current_radius - layer_thickness
+    #         num_micro_layers = layer.get('num_micro_layers', 1)
+    #         num_patches = self.num_patches
+    #         micro_layer_thickness = layer_thickness / num_micro_layers
+    #         for j in range(num_micro_layers):
+    #             r = current_radius - j * micro_layer_thickness
+    #             patches = []
+    #             for k in range(num_patches):
+    #                 start_angle = (k * 360 / num_patches + total_rotation) % 360
+    #                 end_angle = ((k + 1) * 360 / num_patches + total_rotation) % 360
+    #                 density = layer['density_profile'][j, k]
+    #                 color = self.get_layer_color(density)
+    #                 wedge = Wedge(
+    #                     center, r, start_angle, end_angle,
+    #                     width=micro_layer_thickness, facecolor=color, edgecolor='none'
+    #                 )
+    #                 patches.append(wedge)
+    #                 # Add text labels if enabled
+    #                 if self.show_labels:
+    #                     # Calculate patch width in pixels
+    #                     patch_angle = 360 / num_patches
+    #                     patch_arc_length = 2 * np.pi * r * (patch_angle / 360)
+    #                     patch_width_pixels = patch_arc_length * view_scale
+                        
+    #                     # Get label content based on patch width
+    #                     label_content = self.get_visible_label_content(
+    #                         density=layer['density_profile'][j, k],
+    #                         layer_idx=i,
+    #                         micro_layer_idx=j,
+    #                         patch_idx=k,
+    #                         patch_width_pixels=patch_width_pixels
+    #                     )
+                        
+    #                     if label_content:
+    #                         mid_angle = np.radians((start_angle + end_angle) / 2)
+    #                         text_r = r - micro_layer_thickness / 2
+    #                         text_x = center[0] + text_r * np.cos(mid_angle)
+    #                         text_y = center[1] + text_r * np.sin(mid_angle)
+    #                         ax.text(
+    #                             text_x, text_y, label_content,
+    #                             ha='center', va='center',
+    #                             fontsize=self.label_settings['font_size'],
+    #                             rotation=np.degrees(mid_angle) + 90
+    #                         )
+    #             collection = PatchCollection(patches, match_original=True)
+    #             ax.add_collection(collection)
+    #         current_radius = next_radius
+    #     outer_circle = Circle(center, radius, fill=False, edgecolor='black', linewidth=2)
+    #     ax.add_artist(outer_circle)
+    #     if self.show_labels:
+    #         ax.text(
+    #             center[0], center[1], material['name'], ha='center', va='center',
+    #             fontsize=10, fontweight='bold', color='black', rotation=total_rotation
+    #         )
+    #     if 'rotation_angle' in material:
+    #         marker_angle = np.radians(total_rotation)
+    #         marker_radius = radius * 0.8
+    #         marker_x = center[0] + marker_radius * np.cos(marker_angle)
+    #         marker_y = center[1] + marker_radius * np.sin(marker_angle)
+    #         ax.plot([center[0], marker_x], [center[1], marker_y], color='red', linewidth=2)
+    #     for child in material.get('child_bodies', []):
+    #         parent_layer = child['parent_layer']
+    #         placement_angle = (child['placement_angle'] + total_rotation) % 360
+    #         parent_layers = layers[:parent_layer + 1]
+    #         parent_outer_radius = radius - sum(layer['thickness'] for layer in layers[:parent_layer]) * radius
+    #         parent_inner_radius = radius - sum(layer['thickness'] for layer in parent_layers) * radius
+    #         child_radius = (parent_outer_radius - parent_inner_radius) / 2
+    #         child_center_radius = (parent_outer_radius + parent_inner_radius) / 2
+    #         child_center = (
+    #             center[0] + child_center_radius * np.cos(np.radians(placement_angle)),
+    #             center[1] + child_center_radius * np.sin(np.radians(placement_angle))
+    #         )
+    #         self.plot_body(
+    #             ax, child, child_center, child_radius, is_child=True, parent_rotation=total_rotation
+    #         )
     def plot_body(
         self,
         ax,
@@ -1086,6 +1283,17 @@ class MaterialBodyCanvas(FigureCanvas):
             color='black', 
             rotation=total_rotation
         )
+
+        # Get the current view limits
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        
+        # Calculate the approximate pixel width of a patch
+        bbox = ax.get_window_extent()
+        view_width = bbox.width
+        xlim = ax.get_xlim()
+        view_scale = view_width / (xlim[1] - xlim[0])
+
         for i, layer in enumerate(layers):
             layer_thickness = layer['thickness'] * radius
             next_radius = current_radius - layer_thickness
@@ -1107,14 +1315,34 @@ class MaterialBodyCanvas(FigureCanvas):
                     patches.append(wedge)
                     # Add text labels if enabled
                     if self.show_labels:
+                        # Calculate patch center
                         mid_angle = np.radians((start_angle + end_angle) / 2)
                         text_r = r - micro_layer_thickness / 2
                         text_x = center[0] + text_r * np.cos(mid_angle)
                         text_y = center[1] + text_r * np.sin(mid_angle)
-                        ax.text(
-                            text_x, text_y, f"{j},{k}\n{density:.2f}",
-                            ha='center', va='center', fontsize=8
-                        )
+                        # Check if the patch is within the current view
+                        if (xlim[0] <= text_x <= xlim[1]) and (ylim[0] <= text_y <= ylim[1]):
+                            # Calculate patch width in pixels
+                            patch_angle = 360 / num_patches
+                            patch_arc_length = 2 * np.pi * r * (patch_angle / 360)
+                            patch_width_pixels = patch_arc_length * view_scale
+                            
+                            # Get label content based on patch width
+                            label_content = self.get_visible_label_content(
+                                density=layer['density_profile'][j, k],
+                                layer_idx=i,
+                                micro_layer_idx=j,
+                                patch_idx=k,
+                                patch_width_pixels=patch_width_pixels
+                            )
+                            
+                            if label_content:
+                                ax.text(
+                                    text_x, text_y, label_content,
+                                    ha='center', va='center',
+                                    fontsize=self.label_settings['font_size'],
+                                    rotation=np.degrees(mid_angle) + 90
+                                )
                 collection = PatchCollection(patches, match_original=True)
                 ax.add_collection(collection)
             current_radius = next_radius
