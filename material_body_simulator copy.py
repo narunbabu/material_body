@@ -187,6 +187,62 @@ def find_nearest_patches_vectorized(
     ]
     return nearest_densities, micro_layer_indices, patch_indices
 
+# def patch_mappings(
+#     child_patch_positions: Dict[str, Any],
+#     parent_patch_positions: Dict[str, Any],
+#     parent_center:Tuple[float, float],
+#     ) -> Dict[int, List[int]]:
+#     """
+#     Maps child patches to the nearest parent patches.
+
+#     Args:
+#         child_patch_positions: Dictionary containing child patch coordinates and info.
+#         parent_patch_positions: Dictionary containing parent patch coordinates and info.
+
+#     Returns:
+#         Dictionary mapping child patch indices to parent patch information.
+#     """
+#     child_x = child_patch_positions['x_coords'].flatten()
+#     child_y = child_patch_positions['y_coords'].flatten()
+#     child_angles = np.arctan2(child_y, child_x)
+#     parent_x = parent_patch_positions['x_coords']
+#     parent_y = parent_patch_positions['y_coords']
+#     parent_angles = np.arctan2(parent_y, parent_x)
+#     parent_radii = parent_patch_positions['radii']
+#     num_child_patches = len(child_x)
+#     num_parent_micro_layers = len(parent_radii)
+#     layer_boundaries = []
+#     for i in range(num_parent_micro_layers):
+#         current_radius = parent_radii[i]
+#         if i < num_parent_micro_layers - 1:
+#             thickness = abs(parent_radii[i] - parent_radii[i + 1])
+#         else:
+#             thickness = abs(parent_radii[i] - parent_radii[i - 1])
+#         outer_radius = current_radius + thickness / 2
+#         inner_radius = current_radius - thickness / 2
+#         layer_boundaries.append((inner_radius, outer_radius))
+#     mappings = {}
+#     for child_idx in range(num_child_patches):
+#         child_angle = child_angles[child_idx]
+#         child_radial_distance  = np.sqrt((child_x[child_idx]-parent_center[0]) ** 2 + (child_y[child_idx]-parent_center[1]) ** 2)
+#         print(f"child_idx: {child_idx} Ch RD: {child_radial_distance} parent_center: {parent_center}")
+#         micro_layer_idx = None
+#         for idx, (inner_r, outer_r) in enumerate(layer_boundaries):
+#             if inner_r <= child_radial_distance  <= outer_r:
+#                 micro_layer_idx = idx
+#                 break
+#         if micro_layer_idx is None:
+#             distances = [
+#                 min(abs(child_radial_distance  - inner_r), abs(child_radial_distance  - outer_r))
+#                 for inner_r, outer_r in layer_boundaries
+#             ]
+#             micro_layer_idx = np.argmin(distances)
+#         angular_diff = np.abs(np.angle(
+#             np.exp(1j * (parent_angles[micro_layer_idx] - child_angle))
+#         ))
+#         patch_idx = np.argmin(angular_diff)
+#         mappings[child_idx] = [0, micro_layer_idx, patch_idx]
+#     return mappings
 
 def patch_mappings(
     child_patch_positions: Dict[str, Any],
@@ -262,6 +318,41 @@ def patch_mappings(
         mappings[child_idx] = [0, micro_layer_idx, patch_idx]
     
     return mappings
+# def calculate_child_patch_positions(
+#     child_body: Dict[str, Any],
+#     parent_radius: float,
+#     parent_center: Tuple[float, float],
+#     rotation_angle: float = 0.0
+#     ) -> Dict[str, Any]:
+#     """
+#     Calculate patch positions for child body's outer layer.
+
+#     Args:
+#         child_body: The child body.
+#         parent_radius: Radius of the parent body.
+#         parent_center: Center of the parent body.
+#         rotation_angle: Rotation angle in radians.
+
+#     Returns:
+#         Dictionary containing patch positions for the child body.
+#     """
+#     child_center = child_body['center']
+#     child_radius = child_body['radius']
+#     num_patches = len(child_body['layers'][0]['density_profile'][0])
+#     layer_thicknesses = [layer['thickness'] * child_radius for layer in child_body['layers']]
+#     num_micro_layers = 1  # Only outermost micro-layer
+#     layer_indices = [0]
+#     patch_positions = calculate_all_patch_centers(
+#         child_body,
+#         child_center,
+#         child_radius,
+#         layer_thicknesses,
+#         num_patches,
+#         layer_indices=layer_indices,
+#         num_micro_layers=num_micro_layers,
+#         rotation_angle=rotation_angle
+#     )
+#     return patch_positions[0]
 
 def calculate_parent_patch_positions(
     parent_body: Dict[str, Any],
@@ -305,7 +396,91 @@ def calculate_parent_patch_positions(
     )
     return patch_positions[parent_layer_index]
 
+# def update_child_body_density(
+#     parent_body: Dict[str, Any],
+#     child_body: Dict[str, Any],
+#     parent_center: Tuple[float, float] = (0.0, 0.0),
+#     parent_radius: float = 1.0
+#     ) -> None:
+#     """
+#     Recursively update the density of a child body and all its descendants based on their parents.
 
+#     Args:
+#         parent_body: The parent body.
+#         child_body: The child body whose density needs to be updated.
+#         parent_center: Center coordinates of the parent body.
+#         parent_radius: Radius of the parent body.
+#     """
+#     # Update the current child body's density based on its parent
+#     parent_layer = parent_body['layers'][child_body['parent_layer']]
+#     num_patches = len(parent_layer['density_profile'][0])
+    
+#     # Calculate child body's position relative to parent
+#     child_center_radius = parent_radius * (
+#         1 - sum(l['thickness'] for l in parent_body['layers'][:child_body['parent_layer']]) -
+#         parent_layer['thickness'] / 2
+#     )
+#     child_placement_angle = np.radians(child_body['placement_angle'])
+#     child_center = (
+#         parent_center[0] + child_center_radius * np.cos(child_placement_angle),
+#         parent_center[1] + child_center_radius * np.sin(child_placement_angle)
+#     )
+#     child_body['center'] = child_center
+#     child_body['radius'] = parent_radius * parent_layer['thickness'] / 2
+
+#     # Calculate densities
+#     parent_patch_positions = calculate_parent_patch_positions(
+#         parent_body,
+#         child_body['parent_layer'],
+#         parent_center,
+#         parent_radius
+#     )
+
+#     child_patch_positions = calculate_child_patch_positions(
+#         child_body,
+#         parent_radius,
+#         parent_center
+#     )
+#     if child_body['name']=='B':
+#         print(f"Parent patch for child body: {child_body['name']}")
+#         print_patch_positions(parent_patch_positions)
+#         print(f"Child patch for child body: {child_body['name']}")
+#         print_patch_positions(child_patch_positions)
+#     child_patch_mappings = patch_mappings(child_patch_positions, parent_patch_positions, parent_center)
+#     nearest_densities, _, _ = find_nearest_patches_vectorized(
+#         child_patch_mappings,
+#         parent_patch_positions
+#     )
+
+#     print(f"\nchild_patch_mappings for Body {child_body['name']}: \n")
+#     print_patch_mappings(child_patch_positions, parent_patch_positions, child_patch_mappings)
+
+
+#     # Update densities for all layers of the current child body
+#     for layer_index, child_layer in enumerate(child_body['layers']):
+#         num_micro_layers = child_layer.get('num_micro_layers', 1)
+#         if layer_index == 0:
+#             if 'original_density_profile' not in child_layer:
+#                 child_layer['original_density_profile'] = child_layer['density_profile'][0:1].copy()
+#             child_layer['density_profile'][0] = nearest_densities + 0.01
+#             outer_layer_increase = child_layer['density_profile'][0] - child_layer['original_density_profile'][0]
+#             if num_micro_layers > 1:
+#                 child_layer['density_profile'][1:] += outer_layer_increase
+#         else:
+#             outer_layer_increase = (
+#                 child_body['layers'][0]['density_profile'][0] -
+#                 child_body['layers'][0]['original_density_profile'][0]
+#             )
+#             child_layer['density_profile'] += outer_layer_increase[np.newaxis, :]
+
+#     # Recursively update all descendants
+#     for grandchild in child_body.get('child_bodies', []):
+#         update_child_body_density(
+#             child_body,  # This child becomes the parent for its own children
+#             grandchild,
+#             child_center,  # Pass the updated center
+#             child_body['radius']  # Pass the updated radius
+#         )
 def update_child_body_density(
     parent_body: Dict[str, Any],
     child_body: Dict[str, Any],
@@ -499,6 +674,75 @@ def calculate_external_density(body):
     else:
         return 0.0
 
+class LabelVisibilityHandler:
+    """
+    Handles dynamic visibility of labels based on zoom level and body sizes.
+    """
+    def __init__(self):
+        self.min_patch_width_for_all_labels = 40  # pixels
+        self.min_patch_width_for_some_labels = 20  # pixels
+        
+    def calculate_body_screen_size(self, body_center, body_radius, ax, fig):
+        """Calculate the screen size of a body in pixels"""
+        bbox = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+        width_inches = bbox.width
+        height_inches = bbox.height
+        
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        
+        # Convert data units to screen pixels
+        points_per_data_x = (width_inches * fig.dpi) / (xlim[1] - xlim[0])
+        points_per_data_y = (height_inches * fig.dpi) / (ylim[1] - ylim[0])
+        
+        return min(
+            2 * body_radius * points_per_data_x,
+            2 * body_radius * points_per_data_y
+        )
+
+    def get_patch_spacing(self, body_screen_size):
+        """Determine how many patches to skip based on body screen size"""
+        if body_screen_size < 100:  # Very small body
+            return 8  # Show every 8th patch
+        elif body_screen_size < 200:  # Small body
+            return 4  # Show every 4th patch
+        elif body_screen_size < 400:  # Medium body
+            return 2  # Show every other patch
+        else:  # Large body
+            return 1  # Show all patches
+
+    def is_body_visible(self, body_center, body_radius, ax):
+        """Check if a body is visible in the current view"""
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        
+        # Check if body's bounding box intersects with view
+        left = body_center[0] - body_radius
+        right = body_center[0] + body_radius
+        bottom = body_center[1] - body_radius
+        top = body_center[1] + body_radius
+        
+        return (left < xlim[1] and right > xlim[0] and
+                bottom < ylim[1] and top > ylim[0])
+
+    def should_show_patch_label(self, body_center, body_radius, patch_idx, num_patches,
+                              micro_layer_idx, num_micro_layers, ax, fig):
+        """Determine if a specific patch label should be shown"""
+        if not self.is_body_visible(body_center, body_radius, ax):
+            return False
+            
+        body_screen_size = self.calculate_body_screen_size(body_center, body_radius, ax, fig)
+        patch_spacing = self.get_patch_spacing(body_screen_size)
+        
+        # For outer layers, show more labels
+        if micro_layer_idx == 0:
+            return patch_idx % patch_spacing == 0
+        
+        # For inner layers, show fewer labels
+        inner_spacing = patch_spacing * 2
+        return (micro_layer_idx % 2 == 0 and patch_idx % inner_spacing == 0)
+# GUI Classes
+
 
 class MaterialBodyCanvas(FigureCanvas):
     """
@@ -517,7 +761,7 @@ class MaterialBodyCanvas(FigureCanvas):
         self.load_saved_colorbars()
         self.set_default_colorbar()
         self.label_texts = []  # List to store label Text objects
-        # self.label_visibility_handler = LabelVisibilityHandler()
+        self.label_visibility_handler = LabelVisibilityHandler()
 
         # self.cmap = cm.get_cmap('viridis_r')
 
@@ -527,16 +771,16 @@ class MaterialBodyCanvas(FigureCanvas):
         self.num_patches = 32  # Number of patches per layer
         self.arrest_revolutions = False
 
-        self.show_labels = True
+        self.show_labels = False
         self.label_settings = {
         'show_density': True,
         'show_layer_index': True,
         'show_micro_layer_index': True,
         'show_patch_index': True,
-        'font_size': 10,
-        'min_patch_width_density': 50,     # minimum pixel width to show density
-        'min_patch_width_indices': 80,     # minimum pixel width to show indices
-        'min_patch_width_all': 120,         # minimum pixel width to show all labels
+        'font_size': 8,
+        'min_patch_width_density': 20,     # minimum pixel width to show density
+        'min_patch_width_indices': 30,     # minimum pixel width to show indices
+        'min_patch_width_all': 40,         # minimum pixel width to show all labels
         }
 
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -556,6 +800,36 @@ class MaterialBodyCanvas(FigureCanvas):
         self.ax.callbacks.connect('ylim_changed', self.update_labels)
         self.plot_material_body()
 
+
+
+    def get_visible_label_content(self, density, layer_idx, micro_layer_idx, patch_idx, patch_width_pixels):
+        """Determine what labels should be visible based on patch width"""
+        if patch_width_pixels < self.label_settings['min_patch_width_density']:
+            return ""
+        
+        parts = []
+        if patch_width_pixels >= self.label_settings['min_patch_width_all']:
+            # Show all enabled labels
+            if self.label_settings['show_density']:
+                parts.append(f"{density:.2f}")
+            if self.label_settings['show_layer_index']:
+                parts.append(f"L{layer_idx}")
+            if self.label_settings['show_micro_layer_index']:
+                parts.append(f"M{micro_layer_idx}")
+            if self.label_settings['show_patch_index']:
+                parts.append(f"P{patch_idx}")
+        elif patch_width_pixels >= self.label_settings['min_patch_width_indices']:
+            # Show only indices if enabled
+            if self.label_settings['show_layer_index']:
+                parts.append(f"L{layer_idx}")
+            if self.label_settings['show_micro_layer_index']:
+                parts.append(f"M{micro_layer_idx}")
+        else:
+            # Show only density if enabled
+            if self.label_settings['show_density']:
+                parts.append(f"{density:.2f}")
+        
+        return "\n".join(parts)
     
     def load_saved_colorbars(self):
         """Load saved colorbars from the colorbars directory"""
@@ -575,7 +849,8 @@ class MaterialBodyCanvas(FigureCanvas):
             self.cmap = self.custom_colorbars['ab']
         else:
             self.cmap = cm.get_cmap('viridis_r')
-
+    # In MaterialBodyCanvas, add method to zoom to specific body:
+    # Add this utility function at the class level if not already present
     def find_parent_body(self, current_body: Dict[str, Any], target_body: Dict[str, Any]) -> Dict[str, Any]:
         """Find the parent body of a given target body"""
         if current_body == target_body:
@@ -688,7 +963,18 @@ class MaterialBodyCanvas(FigureCanvas):
             self.ax.set_ylim(bounds['ymin'] - padding_y, bounds['ymax'] + padding_y)
             self.update_limits()
             self.draw()
-    
+    def plot_material_body(self):
+        self.fig.clear()
+        self.ax = self.fig.add_subplot(111)
+        self.label_texts = []
+        self.label_data = []
+        self.plot_body(self.ax, self.material_object)
+        self.ax.set_aspect('equal', adjustable='datalim')
+        self.ax.axis('off')
+        self.fig.tight_layout(pad=0)
+        self.update_plot_area()
+        self.update_labels()
+
     def update_plot_area(self):
         self.ax.set_position([0, 0, 1, 1])
         fig_width, fig_height = self.get_width_height()
@@ -870,7 +1156,6 @@ class MaterialBodyCanvas(FigureCanvas):
                 rotation=total_rotation
             )
         )
-        self.body_extents[material['name']] = {'center': center, 'radius': radius}
 
         for i, layer in enumerate(layers):
             layer_thickness = layer['thickness'] * radius
@@ -895,8 +1180,7 @@ class MaterialBodyCanvas(FigureCanvas):
                     self.collect_label_data(
                         center, r, micro_layer_thickness,
                         start_angle, end_angle,
-                        density, i, j, k, total_rotation,
-                        body_name=material['name']  # Pass body name
+                        density, i, j, k, total_rotation
                     )
                 collection = PatchCollection(patches, match_original=True)
                 ax.add_collection(collection)
@@ -922,208 +1206,75 @@ class MaterialBodyCanvas(FigureCanvas):
                 ax, child, child_center, child_radius, is_child=True, parent_rotation=total_rotation
             )
 
-    def collect_label_data(
-        self, center, r, micro_layer_thickness,
-        start_angle, end_angle,
-        density, layer_idx, micro_layer_idx, patch_idx, total_rotation,
-        body_name
-        ):
-        if self.show_labels:
-            # Calculate patch center
-            mid_angle = np.radians((start_angle + end_angle) / 2)
-            text_r = r - micro_layer_thickness / 2
-            text_x = center[0] + text_r * np.cos(mid_angle)
-            text_y = center[1] + text_r * np.sin(mid_angle)
-            # Store label data for later use
-            self.label_data.append({
-                'text_x': text_x,
-                'text_y': text_y,
-                'mid_angle': mid_angle,
-                'density': density,
-                'layer_idx': layer_idx,
-                'micro_layer_idx': micro_layer_idx,
-                'patch_idx': patch_idx,
-                'rotation': total_rotation,
-                'start_angle': start_angle,
-                'end_angle': end_angle,
-                'r': r,
-                'body_name': body_name  # Store body name
-            })
+    # def collect_label_data(
+    #     self, center, r, micro_layer_thickness,
+    #     start_angle, end_angle,
+    #     density, layer_idx, micro_layer_idx, patch_idx, total_rotation
+    #     ):
+    #     if self.show_labels:
+    #         # Calculate patch center
+    #         mid_angle = np.radians((start_angle + end_angle) / 2)
+    #         text_r = r - micro_layer_thickness / 2
+    #         text_x = center[0] + text_r * np.cos(mid_angle)
+    #         text_y = center[1] + text_r * np.sin(mid_angle)
+    #         # Store label data for later use
+    #         self.label_data.append({
+    #             'text_x': text_x,
+    #             'text_y': text_y,
+    #             'mid_angle': mid_angle,
+    #             'density': density,
+    #             'layer_idx': layer_idx,
+    #             'micro_layer_idx': micro_layer_idx,
+    #             'patch_idx': patch_idx,
+    #             'rotation': total_rotation
+    #         })
+    # def update_labels(self, event=None):
+    #     # Clear existing labels
+    #     for text in self.label_texts:
+    #         text.remove()
+    #     self.label_texts = []
+    #     xlim = self.ax.get_xlim()
+    #     ylim = self.ax.get_ylim()
+    #     bbox = self.ax.get_window_extent()
+    #     view_width = bbox.width
+    #     view_scale = view_width / (xlim[1] - xlim[0])
 
-    
-    def update_labels(self, event=None):
-        # Clear existing labels
-        for text in self.label_texts:
-            text.remove()
-        self.label_texts = []
-        xlim = self.ax.get_xlim()
-        ylim = self.ax.get_ylim()
-        bbox = self.ax.get_window_extent()
-        data_width = xlim[1] - xlim[0]
-        data_height = ylim[1] - ylim[0]
-        view_scale = bbox.width / data_width  # pixels per data unit
+    #     for data in self.label_data:
+    #         text_x = data['text_x']
+    #         text_y = data['text_y']
+    #         mid_angle = data['mid_angle']
+    #         density = data['density']
+    #         layer_idx = data['layer_idx']
+    #         micro_layer_idx = data['micro_layer_idx']
+    #         patch_idx = data['patch_idx']
 
-        min_pixel_size = 20  # Minimum pixel size for labels
-        max_step = 8  # Maximum step size
-        # Create a dictionary to track if labels are displayed for each body
-        body_labels_displayed = {body_name: False for body_name in self.body_extents.keys()}
+    #         # Check if the label is within the current view
+    #         if (xlim[0] <= text_x <= xlim[1]) and (ylim[0] <= text_y <= ylim[1]):
+    #             # Calculate patch width in pixels
+    #             patch_angle = 360 / self.num_patches
+    #             r = np.sqrt(text_x**2 + text_y**2)
+    #             patch_arc_length = 2 * np.pi * r * (patch_angle / 360)
+    #             patch_width_pixels = patch_arc_length * view_scale
 
+    #             # Get label content based on patch width
+    #             label_content = self.get_visible_label_content(
+    #                 density=density,
+    #                 layer_idx=layer_idx,
+    #                 micro_layer_idx=micro_layer_idx,
+    #                 patch_idx=patch_idx,
+    #                 patch_width_pixels=patch_width_pixels
+    #             )
 
-        def is_body_partially_visible(center, radius, xlim, ylim):
-            x0, y0 = center
-            xmin, xmax = xlim
-            ymin, ymax = ylim
-            return not (x0 + radius < xmin or x0 - radius > xmax or y0 + radius < ymin or y0 - radius > ymax)
+    #             if label_content:
+    #                 text = self.ax.text(
+    #                     text_x, text_y, label_content,
+    #                     ha='center', va='center',
+    #                     fontsize=self.label_settings['font_size'],
+    #                     rotation=np.degrees(mid_angle) + 90
+    #                 )
+    #                 self.label_texts.append(text)
+    #     self.draw_idle()
 
-        for data in self.label_data:
-            body_name = data['body_name']
-            center = self.body_extents[body_name]['center']
-            radius = self.body_extents[body_name]['radius']
-
-            # Check if the body is at least partially visible
-            if not is_body_partially_visible(center, radius, xlim, ylim):
-                continue  # Skip labels for this body
-
-            text_x = data['text_x']
-            text_y = data['text_y']
-            mid_angle = data['mid_angle']
-            density = data['density']
-            layer_idx = data['layer_idx']
-            micro_layer_idx = data['micro_layer_idx']
-            patch_idx = data['patch_idx']
-            start_angle = data['start_angle']
-            end_angle = data['end_angle']
-            r = data['r']
-
-            # Compute angular width in radians
-            delta_theta = (end_angle - start_angle) * np.pi / 180
-
-            # Compute arc length in data units
-            s = r * delta_theta
-
-            # Compute arc length in pixels
-            s_pixels = s * view_scale
-
-            # Compute step size
-            step = max(1, int(self.label_settings['min_patch_width_density'] / s_pixels))
-            step = min(step, max_step)
-
-            # Decide whether to show label
-            if patch_idx % step == 0:
-                # Get label content based on patch width
-                label_content = self.get_visible_label_content(
-                    density=density,
-                    layer_idx=layer_idx,
-                    micro_layer_idx=micro_layer_idx,
-                    patch_idx=patch_idx,
-                    patch_width_pixels=s_pixels
-                )
-
-                if label_content:
-                    text = self.ax.text(
-                        text_x, text_y, label_content,
-                        ha='center', va='center',
-                        fontsize=self.label_settings['font_size'],
-                        rotation=np.degrees(mid_angle) + 90
-                    )
-                    self.label_texts.append(text)
-                    body_labels_displayed[body_name] = True  # Mark that labels are displayed for this body
-
-        # Second pass: For bodies without labels displayed, check their parents
-        for body_name, labels_displayed in body_labels_displayed.items():
-            if not labels_displayed:
-                parent_body_name = self.find_parent_body_name(body_name)
-                if parent_body_name:
-                    # Display labels on the parent body
-                    self.display_labels_on_body(parent_body_name, xlim, ylim, view_scale, max_step)
-                else:
-                    # If no parent, display labels on the root body
-                    self.display_labels_on_body(body_name, xlim, ylim, view_scale, max_step)
-
-        self.draw_idle()
-    def find_parent_body_name(self, body_name):
-        """Find the parent body name of the given body."""
-        for child_name, parent_name in self.body_parent_map.items():
-            if child_name == body_name:
-                return parent_name
-        return None
-
-    def build_body_parent_map(self, body, parent_name=None):
-        """Build a map of child body names to their parent body names."""
-        if not hasattr(self, 'body_parent_map'):
-            self.body_parent_map = {}
-        for child in body.get('child_bodies', []):
-            self.body_parent_map[child['name']] = body['name']
-            self.build_body_parent_map(child, body['name'])
-
-    def display_labels_on_body(self, body_name, xlim, ylim, view_scale, max_step):
-        """Display labels on the specified body."""
-        for data in self.label_data:
-            if data['body_name'] != body_name:
-                continue
-            # Proceed to display labels as before
-            # ... (rest of the code remains the same)
-            # Extract data needed for label display
-            text_x = data['text_x']
-            text_y = data['text_y']
-            mid_angle = data['mid_angle']
-            density = data['density']
-            layer_idx = data['layer_idx']
-            micro_layer_idx = data['micro_layer_idx']
-            patch_idx = data['patch_idx']
-            start_angle = data['start_angle']
-            end_angle = data['end_angle']
-            r = data['r']
-
-            # Compute angular width in radians
-            delta_theta = (end_angle - start_angle) * np.pi / 180
-
-            # Compute arc length in data units
-            s = r * delta_theta
-
-            # Compute arc length in pixels
-            s_pixels = s * view_scale
-
-            # Compute step size
-            step = max(1, int(self.label_settings['min_patch_width_density'] / s_pixels))
-            step = min(step, max_step)
-
-            # Decide whether to show label
-            if patch_idx % step == 0:
-                # Get label content based on patch width
-                label_content = self.get_visible_label_content(
-                    density=density,
-                    layer_idx=layer_idx,
-                    micro_layer_idx=micro_layer_idx,
-                    patch_idx=patch_idx,
-                    patch_width_pixels=s_pixels
-                )
-
-                if label_content:
-                    text = self.ax.text(
-                        text_x, text_y, label_content,
-                        ha='center', va='center',
-                        fontsize=self.label_settings['font_size'],
-                        rotation=np.degrees(mid_angle) + 90
-                    )
-                    self.label_texts.append(text)
-
-    def plot_material_body(self):
-        self.fig.clear()
-        self.ax = self.fig.add_subplot(111)
-        self.label_texts = []
-        self.label_data = []
-        self.body_extents = {}  # Initialize body extents
-        self.body_parent_map = {}  # Initialize body parent map
-        self.build_body_parent_map(self.material_object)
-        self.plot_body(self.ax, self.material_object)
-        self.ax.set_aspect('equal', adjustable='datalim')
-        self.ax.axis('off')
-        self.fig.tight_layout(pad=0)
-        self.update_plot_area()
-        self.update_labels()
-
-    
     def on_scroll(self, event):
         zoom_factor = 1.15
         xdata, ydata = event.xdata, event.ydata
@@ -1147,8 +1298,7 @@ class MaterialBodyCanvas(FigureCanvas):
         self.ax.set_ylim(new_ylim)
         self.update_limits()
         self.current_zoom *= scale_factor
-        # print(f"Current zoom: {self.current_zoom} scale_factor: {scale_factor}")
-        self.update_labels()  # Add this line
+        print(f"Current zoom: {self.current_zoom} scale_factor: {scale_factor}")
         self.draw_idle()
 
     def on_motion(self, event):
@@ -1165,41 +1315,88 @@ class MaterialBodyCanvas(FigureCanvas):
             self.ax.set_xlim(new_xlim)
             self.ax.set_ylim(new_ylim)
             self.update_limits()
-            self.update_labels()  # Add this line
             self.draw_idle()
+    def collect_label_data(self, center, r, micro_layer_thickness,
+                          start_angle, end_angle, density, layer_idx,
+                          micro_layer_idx, patch_idx, total_rotation):
+        if self.show_labels:
+            mid_angle = np.radians((start_angle + end_angle) / 2)
+            text_r = r - micro_layer_thickness / 2
+            text_x = center[0] + text_r * np.cos(mid_angle)
+            text_y = center[1] + text_r * np.sin(mid_angle)
+            
+            body_radius = r  # Use the current radius as the body radius
+            should_show = self.label_visibility_handler.should_show_patch_label(
+                center, body_radius, patch_idx, self.num_patches,
+                micro_layer_idx, layer_idx, self.ax, self.figure
+            )
+            
+            if should_show:
+                self.label_data.append({
+                    'text_x': text_x,
+                    'text_y': text_y,
+                    'mid_angle': mid_angle,
+                    'density': density,
+                    'layer_idx': layer_idx,
+                    'micro_layer_idx': micro_layer_idx,
+                    'patch_idx': patch_idx,
+                    'rotation': total_rotation,
+                    'body_radius': body_radius,
+                    'body_center': center
+                })
 
-
-    def get_visible_label_content(self, density, layer_idx, micro_layer_idx, patch_idx, patch_width_pixels):
-        """Determine what labels should be visible based on patch width"""
-        if patch_width_pixels < self.label_settings['min_patch_width_density']:
-            return ""
+    def update_labels(self, event=None):
+        # Clear existing labels
+        for text in self.label_texts:
+            text.remove()
+        self.label_texts = []
         
-        parts = []
-        if patch_width_pixels >= self.label_settings['min_patch_width_all']:
-            # Show all enabled labels
-            if self.label_settings['show_density']:
-                parts.append(f"{density:.2f}")
-            if self.label_settings['show_layer_index']:
-                parts.append(f"L{layer_idx}, M{micro_layer_idx}")
-            # if self.label_settings['show_micro_layer_index']:
-            #     parts.append(f"M{micro_layer_idx}")
-            if self.label_settings['show_patch_index']:
-                parts.append(f"P{patch_idx}")
-        elif patch_width_pixels >= self.label_settings['min_patch_width_indices']:
-            # Show only indices if enabled
-            if self.label_settings['show_layer_index']:
-                parts.append(f"L{layer_idx}, M{micro_layer_idx}")
-            # if self.label_settings['show_micro_layer_index']:
-            #     parts.append(f"M{micro_layer_idx}")
-            if self.label_settings['show_density']:
-                parts.append(f"{density:.2f}")
-        else:
-            # Show only density if enabled
-            if self.label_settings['show_density']:
-                parts.append(f"{density:.2f}")
+        # Update visibility for each label
+        visible_labels = []
+        for data in self.label_data:
+            if self.label_visibility_handler.should_show_patch_label(
+                data['body_center'], data['body_radius'],
+                data['patch_idx'], self.num_patches,
+                data['micro_layer_idx'], data['layer_idx'],
+                self.ax, self.figure
+            ):
+                visible_labels.append(data)
         
-        return "\n".join(parts)
+        # Create labels for visible patches
+        for data in visible_labels:
+            label_content = self.get_visible_label_content(
+                density=data['density'],
+                layer_idx=data['layer_idx'],
+                micro_layer_idx=data['micro_layer_idx'],
+                patch_idx=data['patch_idx'],
+                patch_width_pixels=self.calculate_patch_width_pixels(
+                    data['body_radius'],
+                    self.num_patches
+                )
+            )
+            
+            if label_content:
+                text = self.ax.text(
+                    data['text_x'], data['text_y'],
+                    label_content,
+                    ha='center', va='center',
+                    fontsize=self.label_settings['font_size'],
+                    rotation=np.degrees(data['mid_angle']) + 90
+                )
+                self.label_texts.append(text)
+        
+        self.draw_idle()
 
+    def calculate_patch_width_pixels(self, radius, num_patches):
+        """Calculate the width of a patch in pixels"""
+        bbox = self.ax.get_window_extent()
+        xlim = self.ax.get_xlim()
+        view_width = bbox.width
+        view_scale = view_width / (xlim[1] - xlim[0])
+        
+        patch_angle = 360 / num_patches
+        patch_arc_length = 2 * np.pi * radius * (patch_angle / 360)
+        return patch_arc_length * view_scale
 class MaterialBodySimulator(QMainWindow):
     """
     The main application window that orchestrates the simulation.
