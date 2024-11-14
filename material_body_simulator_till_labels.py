@@ -1,5 +1,4 @@
-#Preivous version
-#material_body_simulator.py 
+#material_body_simulator.py
 import sys
 import pickle
 from dataclasses import dataclass
@@ -500,6 +499,7 @@ def calculate_external_density(body):
     else:
         return 0.0
 
+
 class MaterialBodyCanvas(FigureCanvas):
     """
     Canvas for rendering material bodies using Matplotlib within a PyQt6 widget.
@@ -513,13 +513,13 @@ class MaterialBodyCanvas(FigureCanvas):
         self.selected_body = material_object
         self.current_zoom = 1.0
         self.compulsory_increase = 0.01
-        self.previous_plot_detail = {}  # For caching
-        self.body_extents = {}  # To track body positions and sizes
-
         # Load saved colorbars and set default
         self.load_saved_colorbars()
         self.set_default_colorbar()
         self.label_texts = []  # List to store label Text objects
+        # self.label_visibility_handler = LabelVisibilityHandler()
+
+        # self.cmap = cm.get_cmap('viridis_r')
 
         self.pan_active = False
         self.pan_start = None
@@ -529,14 +529,14 @@ class MaterialBodyCanvas(FigureCanvas):
 
         self.show_labels = True
         self.label_settings = {
-            'show_density': True,
-            'show_layer_index': True,
-            'show_micro_layer_index': True,
-            'show_patch_index': True,
-            'font_size': 10,
-            'min_patch_width_density': 50,     # minimum pixel width to show density
-            'min_patch_width_indices': 80,     # minimum pixel width to show indices
-            'min_patch_width_all': 120,        # minimum pixel width to show all labels
+        'show_density': True,
+        'show_layer_index': True,
+        'show_micro_layer_index': True,
+        'show_patch_index': True,
+        'font_size': 10,
+        'min_patch_width_density': 50,     # minimum pixel width to show density
+        'min_patch_width_indices': 80,     # minimum pixel width to show indices
+        'min_patch_width_all': 120,         # minimum pixel width to show all labels
         }
 
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -549,13 +549,14 @@ class MaterialBodyCanvas(FigureCanvas):
         self.mpl_connect('button_press_event', self.start_pan)
         self.mpl_connect('button_release_event', self.end_pan)
         self.mpl_connect('motion_notify_event', self.on_motion)
-        self.mpl_connect('draw_event', self.on_draw)  # Connect draw event for caching
+
 
         self.ax = self.fig.add_subplot(111)
         self.ax.callbacks.connect('xlim_changed', self.update_labels)
         self.ax.callbacks.connect('ylim_changed', self.update_labels)
         self.plot_material_body()
 
+    
     def load_saved_colorbars(self):
         """Load saved colorbars from the colorbars directory"""
         self.custom_colorbars = {}
@@ -574,10 +575,6 @@ class MaterialBodyCanvas(FigureCanvas):
             self.cmap = self.custom_colorbars['ab']
         else:
             self.cmap = cm.get_cmap('viridis_r')
-
-    def on_draw(self, event):
-        """Handle the draw event to update the previous plot detail."""
-        self.previous_plot_detail.clear()
 
     def find_parent_body(self, current_body: Dict[str, Any], target_body: Dict[str, Any]) -> Dict[str, Any]:
         """Find the parent body of a given target body"""
@@ -602,63 +599,96 @@ class MaterialBodyCanvas(FigureCanvas):
                     return result
             return None
 
-        def calculate_body_bounds(body, center, radius, parent_rotation):
-            """Calculate bounds for the specified body including its children"""
-            bounds = {
+        def get_parent_chain(current_body, target_name, chain=None):
+            """Get the chain of parent bodies up to the target"""
+            if chain is None:
+                chain = []
+                
+            if current_body['name'] == target_name:
+                return chain
+                
+            for child in current_body.get('child_bodies', []):
+                if child['name'] == target_name:
+                    return chain + [current_body]
+                result = get_parent_chain(child, target_name, chain + [current_body])
+                if result is not None:
+                    return result
+            return None
+
+        def calculate_body_position(body, parent_chain):
+            """Calculate body position using parent chain"""
+            if not parent_chain:  # Root body
+                return (0, 0), 1.0, 0.0
+                
+            center = (0, 0)
+            radius = 1.0
+            total_rotation = 0.0
+            
+            # Start from the root and work down to the immediate parent
+            for i in range(len(parent_chain)):
+                parent = parent_chain[i]
+                current = parent_chain[i + 1] if i < len(parent_chain) - 1 else body
+                
+                parent_layer_idx = current['parent_layer']
+                previous_layers_thickness = sum(
+                    layer['thickness'] for layer in parent['layers'][:parent_layer_idx]
+                )
+                current_layer_thickness = parent['layers'][parent_layer_idx]['thickness']
+                
+                # Update radius
+                child_center_radius = radius * (
+                    1 - previous_layers_thickness - current_layer_thickness / 2
+                )
+                radius = radius * current_layer_thickness / 2
+                
+                # Update rotation
+                total_rotation = (total_rotation + parent.get('rotation_angle', 0.0)) % 360
+                angle = (current['placement_angle'] + total_rotation) % 360
+                angle_rad = np.radians(angle)
+                
+                # Update center
+                new_x = center[0] + child_center_radius * np.cos(angle_rad)
+                new_y = center[1] + child_center_radius * np.sin(angle_rad)
+                center = (new_x, new_y)
+                
+            return center, radius, total_rotation
+
+        def find_body_bounds(body, parent_chain):
+            """Calculate bounds for the specified body"""
+            center, radius, _ = calculate_body_position(body, parent_chain)
+            
+            return {
                 'xmin': center[0] - radius,
                 'xmax': center[0] + radius,
                 'ymin': center[1] - radius,
                 'ymax': center[1] + radius
             }
-            rotation_angle = body.get('rotation_angle', 0.0)
-            total_rotation = (rotation_angle + parent_rotation) % 360
-            layers = body['layers']
-            current_radius = radius
-            for layer in layers:
-                layer_thickness = layer['thickness'] * radius
-                current_radius -= layer_thickness
-
-            # Handle child bodies
-            for child in body.get('child_bodies', []):
-                parent_layer = child['parent_layer']
-                placement_angle = (child['placement_angle'] + total_rotation) % 360
-                parent_layers = layers[:parent_layer + 1]
-                parent_outer_radius = radius - sum(layer['thickness'] for layer in layers[:parent_layer]) * radius
-                parent_inner_radius = radius - sum(layer['thickness'] for layer in parent_layers) * radius
-                child_radius = (parent_outer_radius - parent_inner_radius) / 2
-                child_center_radius = (parent_outer_radius + parent_inner_radius) / 2
-                child_center = (
-                    center[0] + child_center_radius * np.cos(np.radians(placement_angle)),
-                    center[1] + child_center_radius * np.sin(np.radians(placement_angle))
-                )
-                child_bounds = calculate_body_bounds(child, child_center, child_radius, total_rotation)
-                bounds['xmin'] = min(bounds['xmin'], child_bounds['xmin'])
-                bounds['xmax'] = max(bounds['xmax'], child_bounds['xmax'])
-                bounds['ymin'] = min(bounds['ymin'], child_bounds['ymin'])
-                bounds['ymax'] = max(bounds['ymax'], child_bounds['ymax'])
-            return bounds
 
         # Find target body
         target_body = find_body(self.material_object, body_name)
         if not target_body:
             return
 
-        # Calculate bounds for the target body including its children
-        bounds = calculate_body_bounds(target_body, (0, 0), 1.0, 0.0)
-
+        # Get chain of parent bodies
+        parent_chain = get_parent_chain(self.material_object, body_name)
+        if parent_chain is None and body_name != self.material_object['name']:
+            return
+        
+        # Calculate bounds for the target body only
+        bounds = find_body_bounds(target_body, parent_chain or [])
+        
         if bounds:
             # Add padding around the bounds
             width = bounds['xmax'] - bounds['xmin']
             height = bounds['ymax'] - bounds['ymin']
-            padding_x = width * 0.1
-            padding_y = height * 0.1
-
+            padding_x = width * 0.2
+            padding_y = height * 0.2
+            
             self.ax.set_xlim(bounds['xmin'] - padding_x, bounds['xmax'] + padding_x)
             self.ax.set_ylim(bounds['ymin'] - padding_y, bounds['ymax'] + padding_y)
             self.update_limits()
-            self.redraw_cached_plot()
-            self.draw_idle()
-
+            self.draw()
+    
     def update_plot_area(self):
         self.ax.set_position([0, 0, 1, 1])
         fig_width, fig_height = self.get_width_height()
@@ -682,6 +712,7 @@ class MaterialBodyCanvas(FigureCanvas):
             min_density, max_density = self.get_density_range(child, min_density, max_density)
         return min_density, max_density
 
+
     def start_pan(self, event):
         if event.button == 3:
             self.pan_active = True
@@ -691,6 +722,7 @@ class MaterialBodyCanvas(FigureCanvas):
         if event.button == 3:
             self.pan_active = False
         self.update_limits()
+
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -732,6 +764,7 @@ class MaterialBodyCanvas(FigureCanvas):
                 layer['density_profile'] = saved_layer['density_profile'].copy()
         for child in body.get('child_bodies', []):
             self._restore_body_state(child, state)
+
 
     def adjust_child_rotation(self, child, parent, time_step):
         parent_layer_index = child['parent_layer']
@@ -813,84 +846,69 @@ class MaterialBodyCanvas(FigureCanvas):
         for child in body.get('child_bodies', []):
             self.update_body_and_children(child, time_step)
 
+    def plot_body(
+        self,
+        ax,
+        material: Dict[str, Any],
+        center: Tuple[float, float] = (0, 0),
+        radius: float = 1.0,
+        is_child: bool = False,
+        parent_rotation: float = 0.0
+        ) -> None:
+        layers = material['layers']
+        rotation_angle = material.get('rotation_angle', 0.0)
+        total_rotation = (rotation_angle + parent_rotation) % 360
+        current_radius = radius
 
-    def on_scroll(self, event):
-        zoom_factor = 1.15
-        xdata, ydata = event.xdata, event.ydata
-        if xdata is None or ydata is None:
-            return
-        if event.button == 'up':
-            scale_factor = 1 / zoom_factor
-        elif event.button == 'down':
-            scale_factor = zoom_factor
-        else:
-            return
-        xlim = self.ax.get_xlim()
-        ylim = self.ax.get_ylim()
-        new_width = (xlim[1] - xlim[0]) * scale_factor
-        new_height = (ylim[1] - ylim[0]) * scale_factor
-        relx = (xdata - xlim[0]) / (xlim[1] - xlim[0])
-        rely = (ydata - ylim[0]) / (ylim[1] - ylim[0])
-        new_xlim = [xdata - new_width * relx, xdata + new_width * (1 - relx)]
-        new_ylim = [ydata - new_height * rely, ydata + new_height * (1 - rely)]
-        self.ax.set_xlim(new_xlim)
-        self.ax.set_ylim(new_ylim)
-        self.update_limits()
-        self.current_zoom *= scale_factor
-        self.redraw_cached_plot()  # Use efficient redraw
-        self.draw_idle()
+        # Always plot the name at center
+        self.label_texts.append(
+            ax.text(
+                center[0], center[1], material['name'],
+                ha='center', va='center',
+                fontsize=10, fontweight='bold',
+                color='black',
+                rotation=total_rotation
+            )
+        )
+        self.body_extents[material['name']] = {'center': center, 'radius': radius}
 
-    def on_motion(self, event):
-        if self.pan_active:
-            dx = event.x - self.pan_start[0]
-            dy = event.y - self.pan_start[1]
-            self.pan_start = (event.x, event.y)
-            xlim = self.ax.get_xlim()
-            ylim = self.ax.get_ylim()
-            scale_x = (xlim[1] - xlim[0]) / self.figure.get_size_inches()[0] / self.figure.dpi
-            scale_y = (ylim[1] - ylim[0]) / self.figure.get_size_inches()[1] / self.figure.dpi
-            new_xlim = (xlim[0] - dx * scale_x, xlim[1] - dx * scale_x)
-            new_ylim = (ylim[0] - dy * scale_y, ylim[1] - dy * scale_y)
-            self.ax.set_xlim(new_xlim)
-            self.ax.set_ylim(new_ylim)
-            self.update_limits()
-            self.redraw_cached_plot()  # Use efficient redraw
-            self.draw_idle()
+        for i, layer in enumerate(layers):
+            layer_thickness = layer['thickness'] * radius
+            next_radius = current_radius - layer_thickness
+            num_micro_layers = layer.get('num_micro_layers', 1)
+            num_patches = self.num_patches
+            micro_layer_thickness = layer_thickness / num_micro_layers
+            for j in range(num_micro_layers):
+                r = current_radius - j * micro_layer_thickness
+                patches = []
+                for k in range(num_patches):
+                    start_angle = (k * 360 / num_patches + total_rotation) % 360
+                    end_angle = ((k + 1) * 360 / num_patches + total_rotation) % 360
+                    density = layer['density_profile'][j, k]
+                    color = self.get_layer_color(density)
+                    wedge = Wedge(
+                        center, r, start_angle, end_angle,
+                        width=micro_layer_thickness, facecolor=color, edgecolor='none'
+                    )
+                    patches.append(wedge)
+                    # Collect label data
+                    self.collect_label_data(
+                        center, r, micro_layer_thickness,
+                        start_angle, end_angle,
+                        density, i, j, k, total_rotation,
+                        body_name=material['name']  # Pass body name
+                    )
+                collection = PatchCollection(patches, match_original=True)
+                ax.add_collection(collection)
+            current_radius = next_radius
 
-    def redraw_cached_plot(self):
-        """Efficiently redraw the plot by leveraging caching."""
-        self.ax.cla()
-        xlim, ylim = self.zoom_limits
-        self.ax.set_xlim(xlim)
-        self.ax.set_ylim(ylim)
-        self.ax.axis('off')
-
-        # Reset plot state
-        self.label_texts = []
-        self.label_data = []
-        if not hasattr(self, 'body_extents'):
-            self.body_extents = {}
-
-        # Plot visible bodies with appropriate detail
-        self.plot_material_body_efficient(self.material_object)
-
-        self.ax.set_aspect('equal', adjustable='datalim')
-        self.fig.tight_layout(pad=0)
-        self.update_labels()
-
-    def plot_material_body_efficient(self, material, center=(0, 0), radius=1.0, parent_rotation=0.0):
-        """Efficient version of plot_body that only draws visible elements"""
-        if not self.is_body_visible(center, radius):
-            return
-
-        detail_level = self.get_plot_detail(material, radius)
-        self._plot_body_details(material, center, radius, parent_rotation, detail_level)
+        outer_circle = Circle(center, radius, fill=False, edgecolor='black', linewidth=2)
+        ax.add_artist(outer_circle)
 
         # Handle child bodies
         for child in material.get('child_bodies', []):
             parent_layer = child['parent_layer']
-            placement_angle = (child['placement_angle'] + parent_rotation + material.get('rotation_angle', 0.0)) % 360
-            layers = material['layers']
+            placement_angle = (child['placement_angle'] + total_rotation) % 360
             parent_layers = layers[:parent_layer + 1]
             parent_outer_radius = radius - sum(layer['thickness'] for layer in layers[:parent_layer]) * radius
             parent_inner_radius = radius - sum(layer['thickness'] for layer in parent_layers) * radius
@@ -900,118 +918,16 @@ class MaterialBodyCanvas(FigureCanvas):
                 center[0] + child_center_radius * np.cos(np.radians(placement_angle)),
                 center[1] + child_center_radius * np.sin(np.radians(placement_angle))
             )
-            self.plot_material_body_efficient(child, child_center, child_radius, (parent_rotation + material.get('rotation_angle', 0.0)) % 360)
-
-    def _plot_body_details(self, material, center, radius, parent_rotation, detail_level):
-        layers = material['layers']
-        rotation_angle = material.get('rotation_angle', 0.0)
-        total_rotation = (rotation_angle + parent_rotation) % 360
-        current_radius = radius
-
-        # Plot body name only if it fits within the view
-        if self.is_point_visible(center):
-            self.label_texts.append(
-                self.ax.text(
-                    center[0], center[1], material['name'],
-                    ha='center', va='center',
-                    fontsize=10, fontweight='bold',
-                    color='black',
-                    rotation=total_rotation
-                )
+            self.plot_body(
+                ax, child, child_center, child_radius, is_child=True, parent_rotation=total_rotation
             )
-        self.body_extents[material['name']] = {'center': center, 'radius': radius}
-
-        # Plot layers based on detail level
-        for i, layer in enumerate(layers):
-            layer_thickness = layer['thickness'] * radius
-            next_radius = current_radius - layer_thickness
-
-            if detail_level == 'outline':
-                # Only plot the outline
-                pass  # We will draw the outer_circle at the end
-            elif detail_level == 'layers':
-                # Plot layers without micro-layers or patches
-                circle = Circle(center, current_radius, fill=False, edgecolor='black', linewidth=1)
-                self.ax.add_artist(circle)
-            elif detail_level == 'micro_layers':
-                num_micro_layers = layer.get('num_micro_layers', 1)
-                micro_layer_thickness = layer_thickness / num_micro_layers
-                for j in range(num_micro_layers):
-                    r = current_radius - j * micro_layer_thickness
-                    circle = Circle(center, r, fill=False, edgecolor='black', linewidth=0.5)
-                    self.ax.add_artist(circle)
-            elif detail_level == 'patches':
-                num_micro_layers = layer.get('num_micro_layers', 1)
-                num_patches = self.num_patches
-                micro_layer_thickness = layer_thickness / num_micro_layers
-                for j in range(num_micro_layers):
-                    r = current_radius - j * micro_layer_thickness
-                    patches = []
-                    for k in range(num_patches):
-                        start_angle = (k * 360 / num_patches + total_rotation) % 360
-                        end_angle = ((k + 1) * 360 / num_patches + total_rotation) % 360
-                        density = layer['density_profile'][j, k]
-                        color = self.get_layer_color(density)
-                        wedge = Wedge(
-                            center, r, start_angle, end_angle,
-                            width=micro_layer_thickness, facecolor=color, edgecolor='none'
-                        )
-                        patches.append(wedge)
-                        # Collect label data
-                        self.collect_label_data(
-                            center, r, micro_layer_thickness,
-                            start_angle, end_angle,
-                            density, i, j, k, total_rotation,
-                            body_name=material['name']  # Pass body name
-                        )
-                    collection = PatchCollection(patches, match_original=True)
-                    self.ax.add_collection(collection)
-            current_radius = next_radius
-
-        outer_circle = Circle(center, radius, fill=False, edgecolor='black', linewidth=2)
-        self.ax.add_artist(outer_circle)
-
-    def is_body_visible(self, center, radius):
-        """Check if the body is visible within the current view limits"""
-        x0, y0 = center
-        xmin, xmax = self.ax.get_xlim()
-        ymin, ymax = self.ax.get_ylim()
-        return not (x0 + radius < xmin or x0 - radius > xmax or y0 + radius < ymin or y0 - radius > ymax)
-
-    def is_point_visible(self, point):
-        """Check if a point is within the current view limits"""
-        x0, y0 = point
-        xmin, xmax = self.ax.get_xlim()
-        ymin, ymax = self.ax.get_ylim()
-        return xmin <= x0 <= xmax and ymin <= y0 <= ymax
-
-    def get_plot_detail(self, material, radius):
-        """Determine the level of detail to plot for the given material body."""
-        # Compute zoom scale and decide detail level
-        xlim = self.ax.get_xlim()
-        ylim = self.ax.get_ylim()
-        data_width = xlim[1] - xlim[0]
-        data_height = ylim[1] - ylim[0]
-        bbox = self.ax.get_window_extent()
-        view_scale = bbox.width / data_width  # pixels per data unit
-
-        body_pixel_size = radius * view_scale
-
-        if body_pixel_size < 20:
-            return 'outline'
-        elif body_pixel_size < 50:
-            return 'layers'
-        elif body_pixel_size < 100:
-            return 'micro_layers'
-        else:
-            return 'patches'
 
     def collect_label_data(
         self, center, r, micro_layer_thickness,
         start_angle, end_angle,
         density, layer_idx, micro_layer_idx, patch_idx, total_rotation,
         body_name
-    ):
+        ):
         if self.show_labels:
             # Calculate patch center
             mid_angle = np.radians((start_angle + end_angle) / 2)
@@ -1034,6 +950,7 @@ class MaterialBodyCanvas(FigureCanvas):
                 'body_name': body_name  # Store body name
             })
 
+    
     def update_labels(self, event=None):
         # Clear existing labels
         for text in self.label_texts:
@@ -1050,6 +967,7 @@ class MaterialBodyCanvas(FigureCanvas):
         max_step = 8  # Maximum step size
         # Create a dictionary to track if labels are displayed for each body
         body_labels_displayed = {body_name: False for body_name in self.body_extents.keys()}
+
 
         def is_body_partially_visible(center, radius, xlim, ylim):
             x0, y0 = center
@@ -1111,22 +1029,24 @@ class MaterialBodyCanvas(FigureCanvas):
                     self.label_texts.append(text)
                     body_labels_displayed[body_name] = True  # Mark that labels are displayed for this body
 
-        self.draw_idle()
+        # Second pass: For bodies without labels displayed, check their parents
+        for body_name, labels_displayed in body_labels_displayed.items():
+            if not labels_displayed:
+                parent_body_name = self.find_parent_body_name(body_name)
+                if parent_body_name:
+                    # Display labels on the parent body
+                    self.display_labels_on_body(parent_body_name, xlim, ylim, view_scale, max_step)
+                else:
+                    # If no parent, display labels on the root body
+                    self.display_labels_on_body(body_name, xlim, ylim, view_scale, max_step)
 
-    def plot_material_body(self):
-        self.fig.clear()
-        self.ax = self.fig.add_subplot(111)
-        self.label_texts = []
-        self.label_data = []
-        self.body_extents = {}  # Initialize body extents
-        self.body_parent_map = {}  # Initialize body parent map
-        self.build_body_parent_map(self.material_object)
-        self.plot_material_body_efficient(self.material_object)
-        self.ax.set_aspect('equal', adjustable='datalim')
-        self.ax.axis('off')
-        self.fig.tight_layout(pad=0)
-        self.update_plot_area()
-        self.update_labels()
+        self.draw_idle()
+    def find_parent_body_name(self, body_name):
+        """Find the parent body name of the given body."""
+        for child_name, parent_name in self.body_parent_map.items():
+            if child_name == body_name:
+                return parent_name
+        return None
 
     def build_body_parent_map(self, body, parent_name=None):
         """Build a map of child body names to their parent body names."""
@@ -1136,11 +1056,124 @@ class MaterialBodyCanvas(FigureCanvas):
             self.body_parent_map[child['name']] = body['name']
             self.build_body_parent_map(child, body['name'])
 
+    def display_labels_on_body(self, body_name, xlim, ylim, view_scale, max_step):
+        """Display labels on the specified body."""
+        for data in self.label_data:
+            if data['body_name'] != body_name:
+                continue
+            # Proceed to display labels as before
+            # ... (rest of the code remains the same)
+            # Extract data needed for label display
+            text_x = data['text_x']
+            text_y = data['text_y']
+            mid_angle = data['mid_angle']
+            density = data['density']
+            layer_idx = data['layer_idx']
+            micro_layer_idx = data['micro_layer_idx']
+            patch_idx = data['patch_idx']
+            start_angle = data['start_angle']
+            end_angle = data['end_angle']
+            r = data['r']
+
+            # Compute angular width in radians
+            delta_theta = (end_angle - start_angle) * np.pi / 180
+
+            # Compute arc length in data units
+            s = r * delta_theta
+
+            # Compute arc length in pixels
+            s_pixels = s * view_scale
+
+            # Compute step size
+            step = max(1, int(self.label_settings['min_patch_width_density'] / s_pixels))
+            step = min(step, max_step)
+
+            # Decide whether to show label
+            if patch_idx % step == 0:
+                # Get label content based on patch width
+                label_content = self.get_visible_label_content(
+                    density=density,
+                    layer_idx=layer_idx,
+                    micro_layer_idx=micro_layer_idx,
+                    patch_idx=patch_idx,
+                    patch_width_pixels=s_pixels
+                )
+
+                if label_content:
+                    text = self.ax.text(
+                        text_x, text_y, label_content,
+                        ha='center', va='center',
+                        fontsize=self.label_settings['font_size'],
+                        rotation=np.degrees(mid_angle) + 90
+                    )
+                    self.label_texts.append(text)
+
+    def plot_material_body(self):
+        self.fig.clear()
+        self.ax = self.fig.add_subplot(111)
+        self.label_texts = []
+        self.label_data = []
+        self.body_extents = {}  # Initialize body extents
+        self.body_parent_map = {}  # Initialize body parent map
+        self.build_body_parent_map(self.material_object)
+        self.plot_body(self.ax, self.material_object)
+        self.ax.set_aspect('equal', adjustable='datalim')
+        self.ax.axis('off')
+        self.fig.tight_layout(pad=0)
+        self.update_plot_area()
+        self.update_labels()
+
+    
+    def on_scroll(self, event):
+        zoom_factor = 1.15
+        xdata, ydata = event.xdata, event.ydata
+        if xdata is None or ydata is None:
+            return
+        if event.button == 'up':
+            scale_factor = 1 / zoom_factor
+        elif event.button == 'down':
+            scale_factor = zoom_factor
+        else:
+            return
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        new_width = (xlim[1] - xlim[0]) * scale_factor
+        new_height = (ylim[1] - ylim[0]) * scale_factor
+        relx = (xlim[1] - xdata) / (xlim[1] - xlim[0])
+        rely = (ylim[1] - ydata) / (ylim[1] - ylim[0])
+        new_xlim = [xdata - new_width * (1 - relx), xdata + new_width * relx]
+        new_ylim = [ydata - new_height * (1 - rely), ydata + new_height * rely]
+        self.ax.set_xlim(new_xlim)
+        self.ax.set_ylim(new_ylim)
+        self.update_limits()
+        self.current_zoom *= scale_factor
+        # print(f"Current zoom: {self.current_zoom} scale_factor: {scale_factor}")
+        self.update_labels()  # Add this line
+        self.draw_idle()
+
+    def on_motion(self, event):
+        if self.pan_active:
+            dx = event.x - self.pan_start[0]
+            dy = event.y - self.pan_start[1]
+            self.pan_start = (event.x, event.y)
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            scale_x = (xlim[1] - xlim[0]) / self.figure.get_size_inches()[0] / self.figure.dpi
+            scale_y = (ylim[1] - ylim[0]) / self.figure.get_size_inches()[1] / self.figure.dpi
+            new_xlim = (xlim[0] - dx * scale_x, xlim[1] - dx * scale_x)
+            new_ylim = (ylim[0] - dy * scale_y, ylim[1] - dy * scale_y)
+            self.ax.set_xlim(new_xlim)
+            self.ax.set_ylim(new_ylim)
+            self.update_limits()
+            self.update_labels()  # Add this line
+            self.draw_idle()
+
+
     def get_visible_label_content(self, density, layer_idx, micro_layer_idx, patch_idx, patch_width_pixels):
         """Determine what labels should be visible based on patch width"""
         if patch_width_pixels < self.label_settings['min_patch_width_density']:
             return ""
-
+        
         parts = []
         if patch_width_pixels >= self.label_settings['min_patch_width_all']:
             # Show all enabled labels
@@ -1148,19 +1181,23 @@ class MaterialBodyCanvas(FigureCanvas):
                 parts.append(f"{density:.2f}")
             if self.label_settings['show_layer_index']:
                 parts.append(f"L{layer_idx}, M{micro_layer_idx}")
+            # if self.label_settings['show_micro_layer_index']:
+            #     parts.append(f"M{micro_layer_idx}")
             if self.label_settings['show_patch_index']:
                 parts.append(f"P{patch_idx}")
         elif patch_width_pixels >= self.label_settings['min_patch_width_indices']:
             # Show only indices if enabled
             if self.label_settings['show_layer_index']:
                 parts.append(f"L{layer_idx}, M{micro_layer_idx}")
+            # if self.label_settings['show_micro_layer_index']:
+            #     parts.append(f"M{micro_layer_idx}")
             if self.label_settings['show_density']:
                 parts.append(f"{density:.2f}")
         else:
             # Show only density if enabled
             if self.label_settings['show_density']:
                 parts.append(f"{density:.2f}")
-
+        
         return "\n".join(parts)
 
 class MaterialBodySimulator(QMainWindow):
