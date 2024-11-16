@@ -1,4 +1,3 @@
-# Present version with problems of rendering with zoom. After certain zoom it unable to zoom properly and render child bodies properly.
 #material_body_simulator.py
 import sys
 import pickle
